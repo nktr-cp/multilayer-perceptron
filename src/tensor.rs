@@ -1,12 +1,14 @@
+use crate::ops::OpBuilder;
 use ndarray::Array2;
 use rand::{thread_rng, Rng};
 use std::fmt;
+use std::rc::Rc;
 
 #[derive(Clone)]
 pub struct Tensor {
     pub data: Array2<f64>,
     pub grad: Option<Array2<f64>>,
-    requires_grad: bool,
+    pub requires_grad: bool,
 }
 
 impl Tensor {
@@ -86,6 +88,31 @@ impl Tensor {
 
     pub fn requires_grad(&self) -> bool {
         self.requires_grad
+    }
+
+    pub fn matmul(&self, other: &Tensor) -> Result<Tensor, String> {
+        let op = OpBuilder::matmul(Rc::new(self.clone()), Rc::new(other.clone()));
+        op.forward()
+    }
+
+    pub fn add(&self, other: &Tensor) -> Result<Tensor, String> {
+        let op = OpBuilder::add(Rc::new(self.clone()), Rc::new(other.clone()));
+        op.forward()
+    }
+
+    pub fn sigmoid(&self) -> Result<Tensor, String> {
+        let op = OpBuilder::sigmoid(Rc::new(self.clone()));
+        op.forward()
+    }
+
+    pub fn relu(&self) -> Result<Tensor, String> {
+        let op = OpBuilder::relu(Rc::new(self.clone()));
+        op.forward()
+    }
+
+    pub fn tanh(&self) -> Result<Tensor, String> {
+        let op = OpBuilder::tanh(Rc::new(self.clone()));
+        op.forward()
     }
 }
 
