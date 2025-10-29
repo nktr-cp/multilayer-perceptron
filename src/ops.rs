@@ -1,5 +1,6 @@
 use crate::tensor::Tensor;
 use ndarray::Array2;
+use std::cell::RefCell;
 use std::rc::Rc;
 
 #[derive(Debug, Clone)]
@@ -76,11 +77,13 @@ impl OpNode {
     Ok(Tensor {
       data: result,
       grad: if requires_grad {
-        Some(Array2::zeros(result_dim))
+        Some(Rc::new(RefCell::new(Array2::zeros(result_dim))))
       } else {
         None
       },
       requires_grad,
+      graph_id: None,
+      graph: None,
     })
   }
 
@@ -98,11 +101,13 @@ impl OpNode {
     Ok(Tensor {
       data: result,
       grad: if requires_grad {
-        Some(Array2::zeros(result_dim))
+        Some(Rc::new(RefCell::new(Array2::zeros(result_dim))))
       } else {
         None
       },
       requires_grad,
+      graph_id: None,
+      graph: None,
     })
   }
 
@@ -113,11 +118,13 @@ impl OpNode {
     Ok(Tensor {
       data: result,
       grad: if requires_grad {
-        Some(Array2::zeros(result_dim))
+        Some(Rc::new(RefCell::new(Array2::zeros(result_dim))))
       } else {
         None
       },
       requires_grad,
+      graph_id: None,
+      graph: None,
     })
   }
 
@@ -127,11 +134,13 @@ impl OpNode {
     Ok(Tensor {
       data: result,
       grad: if requires_grad {
-        Some(Array2::zeros(result_dim))
+        Some(Rc::new(RefCell::new(Array2::zeros(result_dim))))
       } else {
         None
       },
       requires_grad,
+      graph_id: None,
+      graph: None,
     })
   }
 
@@ -142,11 +151,13 @@ impl OpNode {
     Ok(Tensor {
       data: result,
       grad: if requires_grad {
-        Some(Array2::zeros(result_dim))
+        Some(Rc::new(RefCell::new(Array2::zeros(result_dim))))
       } else {
         None
       },
       requires_grad,
+      graph_id: None,
+      graph: None,
     })
   }
 
@@ -251,8 +262,6 @@ mod tests {
     let op = OpBuilder::matmul(Rc::new(a), Rc::new(b));
     let result = op.forward().unwrap();
 
-    // Expected: [[1*5 + 2*7, 1*6 + 2*8], [3*5 + 4*7, 3*6 + 4*8]]
-    // = [[19, 22], [43, 50]]
     assert_eq!(result.data[[0, 0]], 19.0);
     assert_eq!(result.data[[0, 1]], 22.0);
     assert_eq!(result.data[[1, 0]], 43.0);
@@ -280,22 +289,17 @@ mod tests {
 
     let op = OpBuilder::matmul(Rc::new(a.clone()), Rc::new(b.clone()));
 
-    // Gradient from output (2x2)
     let grad_output = Array2::from_shape_vec((2, 2), vec![1.0, 1.0, 1.0, 1.0]).unwrap();
 
     let gradients = op.backward(&grad_output).unwrap();
 
     assert_eq!(gradients.len(), 2); // Two inputs
 
-    // grad_a = grad_output * b^T
-    // b^T = [[5, 7], [6, 8]]
-    // grad_output * b^T = [[1*5+1*6, 1*7+1*8], [1*5+1*6, 1*7+1*8]] = [[11, 15], [11, 15]]
     assert_eq!(gradients[0][[0, 0]], 11.0);
     assert_eq!(gradients[0][[0, 1]], 15.0);
     assert_eq!(gradients[0][[1, 0]], 11.0);
     assert_eq!(gradients[0][[1, 1]], 15.0);
 
-    // grad_b = a^T * grad_output
     // a^T = [[1, 3], [2, 4]]
     // a^T * grad_output = [[1*1+3*1, 1*1+3*1], [2*1+4*1, 2*1+4*1]] = [[4, 4], [6, 6]]
     assert_eq!(gradients[1][[0, 0]], 4.0);

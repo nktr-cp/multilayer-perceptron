@@ -1,14 +1,21 @@
+use crate::graph::{ComputationGraph, NodeId};
 use crate::ops::OpBuilder;
 use ndarray::Array2;
 use rand::{thread_rng, Rng};
+use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
 
 #[derive(Clone)]
 pub struct Tensor {
   pub data: Array2<f64>,
-  pub grad: Option<Array2<f64>>,
+
+  pub grad: Option<Rc<RefCell<Array2<f64>>>>,
   pub requires_grad: bool,
+
+  pub graph_id: Option<NodeId>,
+
+  pub graph: Option<Rc<RefCell<ComputationGraph>>>,
 }
 
 impl Tensor {
@@ -24,6 +31,8 @@ impl Tensor {
       data: array,
       grad: None,
       requires_grad: false,
+      graph_id: None,
+      graph: None,
     })
   }
 
@@ -32,6 +41,8 @@ impl Tensor {
       data: Array2::zeros((rows, cols)),
       grad: None,
       requires_grad: false,
+      graph_id: None,
+      graph: None,
     }
   }
 
@@ -40,6 +51,8 @@ impl Tensor {
       data: Array2::ones((rows, cols)),
       grad: None,
       requires_grad: false,
+      graph_id: None,
+      graph: None,
     }
   }
 
@@ -51,6 +64,8 @@ impl Tensor {
       data,
       grad: None,
       requires_grad: false,
+      graph_id: None,
+      graph: None,
     }
   }
 
@@ -72,15 +87,15 @@ impl Tensor {
   }
 
   pub fn zero_grad(&mut self) {
-    if let Some(ref mut grad) = self.grad {
-      grad.fill(0.0);
+    if let Some(ref grad) = self.grad {
+      grad.borrow_mut().fill(0.0);
     }
   }
 
   pub fn set_requires_grad(&mut self, requires_grad: bool) {
     self.requires_grad = requires_grad;
     if requires_grad && self.grad.is_none() {
-      self.grad = Some(Array2::zeros(self.data.dim()));
+      self.grad = Some(Rc::new(RefCell::new(Array2::zeros(self.data.dim()))));
     } else if !requires_grad {
       self.grad = None;
     }
@@ -90,29 +105,140 @@ impl Tensor {
     self.requires_grad
   }
 
+  pub fn with_graph(mut self, graph: Rc<RefCell<ComputationGraph>>) -> Self {
+    let node_id = graph.borrow_mut().add_leaf_node(self.clone());
+    self.graph_id = Some(node_id);
+    self.graph = Some(graph);
+    self
+  }
+
+  pub fn is_tracked(&self) -> bool {
+    self.graph_id.is_some() && self.graph.is_some()
+  }
+
+  pub fn grad_at(&self, row: usize, col: usize) -> Option<f64> {
+    if let Some(ref grad) = self.grad {
+      Some(grad.borrow()[[row, col]])
+    } else {
+      None
+    }
+  }
+
+  pub fn set_grad_at(&self, row: usize, col: usize, value: f64) -> Result<(), String> {
+    if let Some(ref grad) = self.grad {
+      grad.borrow_mut()[[row, col]] = value;
+      Ok(())
+    } else {
+      Err("No gradient to set".to_string())
+    }
+  }
+
+  pub fn backward(&self) -> Result<(), String> {
+    if let (Some(graph_ref), Some(node_id)) = (&self.graph, self.graph_id) {
+      graph_ref.borrow_mut().backward(node_id, None)?;
+
+      if let Some(gradient) = graph_ref.borrow().get_node_gradient(node_id) {
+        if let Some(ref self_grad) = self.grad {
+          *self_grad.borrow_mut() = gradient;
+        }
+      }
+
+      Ok(())
+    } else {
+      Err("Tensor is not tracked in a computation graph".to_string())
+    }
+  }
+
   pub fn matmul(&self, other: &Tensor) -> Result<Tensor, String> {
     let op = OpBuilder::matmul(Rc::new(self.clone()), Rc::new(other.clone()));
-    op.forward()
+    let mut result = op.forward()?;
+    if let (Some(graph), Some(self_id)) = (&self.graph, self.graph_id) {
+      if let Some(other_id) = other.graph_id {
+        let output_id =
+          graph
+            .borrow_mut()
+            .add_operation(op, vec![self_id, other_id], result.clone())?;
+        result.graph = Some(graph.clone());
+        result.graph_id = Some(output_id);
+      }
+    } else if let (Some(graph), Some(other_id)) = (&other.graph, other.graph_id) {
+      let self_id = graph.borrow_mut().add_leaf_node(self.clone());
+      let output_id =
+        graph
+          .borrow_mut()
+          .add_operation(op, vec![self_id, other_id], result.clone())?;
+      result.graph = Some(graph.clone());
+      result.graph_id = Some(output_id);
+    }
+
+    Ok(result)
   }
 
   pub fn add(&self, other: &Tensor) -> Result<Tensor, String> {
     let op = OpBuilder::add(Rc::new(self.clone()), Rc::new(other.clone()));
-    op.forward()
+    let mut result = op.forward()?;
+    if let (Some(graph), Some(self_id)) = (&self.graph, self.graph_id) {
+      if let Some(other_id) = other.graph_id {
+        let output_id =
+          graph
+            .borrow_mut()
+            .add_operation(op, vec![self_id, other_id], result.clone())?;
+        result.graph = Some(graph.clone());
+        result.graph_id = Some(output_id);
+      }
+    } else if let (Some(graph), Some(other_id)) = (&other.graph, other.graph_id) {
+      let self_id = graph.borrow_mut().add_leaf_node(self.clone());
+      let output_id =
+        graph
+          .borrow_mut()
+          .add_operation(op, vec![self_id, other_id], result.clone())?;
+      result.graph = Some(graph.clone());
+      result.graph_id = Some(output_id);
+    }
+
+    Ok(result)
   }
 
   pub fn sigmoid(&self) -> Result<Tensor, String> {
     let op = OpBuilder::sigmoid(Rc::new(self.clone()));
-    op.forward()
+    let mut result = op.forward()?;
+    if let (Some(graph), Some(self_id)) = (&self.graph, self.graph_id) {
+      let output_id = graph
+        .borrow_mut()
+        .add_operation(op, vec![self_id], result.clone())?;
+      result.graph = Some(graph.clone());
+      result.graph_id = Some(output_id);
+    }
+
+    Ok(result)
   }
 
   pub fn relu(&self) -> Result<Tensor, String> {
     let op = OpBuilder::relu(Rc::new(self.clone()));
-    op.forward()
+    let mut result = op.forward()?;
+    if let (Some(graph), Some(self_id)) = (&self.graph, self.graph_id) {
+      let output_id = graph
+        .borrow_mut()
+        .add_operation(op, vec![self_id], result.clone())?;
+      result.graph = Some(graph.clone());
+      result.graph_id = Some(output_id);
+    }
+
+    Ok(result)
   }
 
   pub fn tanh(&self) -> Result<Tensor, String> {
     let op = OpBuilder::tanh(Rc::new(self.clone()));
-    op.forward()
+    let mut result = op.forward()?;
+    if let (Some(graph), Some(self_id)) = (&self.graph, self.graph_id) {
+      let output_id = graph
+        .borrow_mut()
+        .add_operation(op, vec![self_id], result.clone())?;
+      result.graph = Some(graph.clone());
+      result.graph_id = Some(output_id);
+    }
+
+    Ok(result)
   }
 }
 
@@ -123,6 +249,8 @@ impl fmt::Debug for Tensor {
       .field("data", &self.data)
       .field("requires_grad", &self.requires_grad)
       .field("has_grad", &self.grad.is_some())
+      .field("is_tracked", &self.is_tracked())
+      .field("graph_id", &self.graph_id)
       .finish()
   }
 }
@@ -147,7 +275,6 @@ mod tests {
 
   #[test]
   fn test_new_inconsistent_rows() {
-    // Test with inconsistent row lengths
     let data = vec![vec![1.0, 2.0], vec![3.0, 4.0, 5.0]]; // Second row has 3 elements
     let result = Tensor::new(data);
 
@@ -190,7 +317,6 @@ mod tests {
     assert_eq!(tensor.shape(), (2, 3));
     assert_eq!(tensor.len(), 6);
 
-    // Check that values are in the expected range
     for i in 0..2 {
       for j in 0..3 {
         let value = tensor.data[[i, j]];
@@ -220,20 +346,19 @@ mod tests {
   fn test_gradient_management() {
     let mut tensor = Tensor::ones(2, 2);
 
-    // Initially no gradient required
     assert!(!tensor.requires_grad());
     assert!(tensor.grad.is_none());
 
-    // Enable gradient computation
     tensor.set_requires_grad(true);
     assert!(tensor.requires_grad());
     assert!(tensor.grad.is_some());
 
     // Check gradient is initialized to zeros
     if let Some(ref grad) = tensor.grad {
+      let grad_borrow = grad.borrow();
       for i in 0..2 {
         for j in 0..2 {
-          assert_eq!(grad[[i, j]], 0.0);
+          assert_eq!(grad_borrow[[i, j]], 0.0);
         }
       }
     }
@@ -250,17 +375,16 @@ mod tests {
     tensor.set_requires_grad(true);
 
     // Modify gradient manually to test zero_grad
-    if let Some(ref mut grad) = tensor.grad {
-      grad[[0, 0]] = 5.0;
-      grad[[1, 1]] = 10.0;
-    }
+    tensor.set_grad_at(0, 0, 5.0).unwrap();
+    tensor.set_grad_at(1, 1, 10.0).unwrap();
 
     tensor.zero_grad();
 
     if let Some(ref grad) = tensor.grad {
+      let grad_borrow = grad.borrow();
       for i in 0..2 {
         for j in 0..2 {
-          assert_eq!(grad[[i, j]], 0.0);
+          assert_eq!(grad_borrow[[i, j]], 0.0);
         }
       }
     }
@@ -291,5 +415,106 @@ mod tests {
     assert!(debug_str.contains("data"));
     assert!(debug_str.contains("requires_grad"));
     assert!(debug_str.contains("has_grad"));
+  }
+
+  #[test]
+  fn test_tensor_with_computation_graph() {
+    use crate::graph::ComputationGraph;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    let graph = Rc::new(RefCell::new(ComputationGraph::new()));
+
+    // Create tracked tensors
+    let mut x = Tensor::new(vec![vec![2.0, 3.0]]).unwrap();
+    let mut y = Tensor::new(vec![vec![4.0], vec![5.0]]).unwrap();
+
+    x.set_requires_grad(true);
+    y.set_requires_grad(true);
+
+    let x = x.with_graph(graph.clone());
+    let y = y.with_graph(graph.clone());
+
+    // Verify tracking
+    assert!(x.is_tracked());
+    assert!(y.is_tracked());
+
+    // Perform operations that should build the graph
+    let result = x.matmul(&y).unwrap();
+
+    // Result should also be tracked
+    assert!(result.is_tracked());
+
+    // Verify the result value
+    assert_eq!(result.data[[0, 0]], 23.0); // 2*4 + 3*5 = 23
+
+    // Test backward pass
+    result.backward().unwrap();
+
+    // Verify gradients are computed
+    assert!(x.grad.is_some());
+    assert!(y.grad.is_some());
+
+    // Check gradient values using helper methods
+    use approx::assert_abs_diff_eq;
+    assert_abs_diff_eq!(x.grad_at(0, 0).unwrap(), 4.0, epsilon = 1e-6); // dy/dx = y[0,0]
+    assert_abs_diff_eq!(x.grad_at(0, 1).unwrap(), 5.0, epsilon = 1e-6); // dy/dx = y[1,0]
+    assert_abs_diff_eq!(y.grad_at(0, 0).unwrap(), 2.0, epsilon = 1e-6); // dy/dy = x[0,0]
+    assert_abs_diff_eq!(y.grad_at(1, 0).unwrap(), 3.0, epsilon = 1e-6); // dy/dy = x[0,1]
+  }
+
+  #[test]
+  fn test_tensor_graph_integration_with_activation() {
+    use crate::graph::ComputationGraph;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    let graph = Rc::new(RefCell::new(ComputationGraph::new()));
+
+    // Create a simple neural network computation: output = sigmoid(input * weight + bias)
+    let mut input = Tensor::new(vec![vec![1.0, 2.0]]).unwrap();
+    let mut weight = Tensor::new(vec![vec![0.5], vec![0.3]]).unwrap();
+    let mut bias = Tensor::new(vec![vec![0.1]]).unwrap();
+
+    input.set_requires_grad(true);
+    weight.set_requires_grad(true);
+    bias.set_requires_grad(true);
+
+    let input = input.with_graph(graph.clone());
+    let weight = weight.with_graph(graph.clone());
+    let bias = bias.with_graph(graph.clone());
+
+    // Forward pass
+    let linear = input.matmul(&weight).unwrap(); // [1*0.5 + 2*0.3] = [1.1]
+    let linear_bias = linear.add(&bias).unwrap(); // [1.1 + 0.1] = [1.2]
+    let output = linear_bias.sigmoid().unwrap(); // sigmoid(1.2)
+
+    assert!(output.is_tracked());
+
+    // Backward pass
+    output.backward().unwrap();
+
+    // All tensors should have gradients
+    assert!(input.grad.is_some());
+    assert!(weight.grad.is_some());
+    assert!(bias.grad.is_some());
+
+    // Gradients should be non-zero
+    if let Some(ref input_grad) = input.grad {
+      let grad_borrow = input_grad.borrow();
+      assert!(grad_borrow[[0, 0]] != 0.0);
+      assert!(grad_borrow[[0, 1]] != 0.0);
+    }
+
+    if let Some(ref weight_grad) = weight.grad {
+      let grad_borrow = weight_grad.borrow();
+      assert!(grad_borrow[[0, 0]] != 0.0);
+      assert!(grad_borrow[[1, 0]] != 0.0);
+    }
+
+    if let Some(ref bias_grad) = bias.grad {
+      let grad_borrow = bias_grad.borrow();
+      assert!(grad_borrow[[0, 0]] != 0.0);
+    }
   }
 }
