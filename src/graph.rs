@@ -1,9 +1,9 @@
+use crate::error::{Result, TensorError};
 use crate::ops::OpNode;
 use crate::tensor::Tensor;
-use ndarray::Array2;
+use ndarray::{Array2, Zip};
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
-use std::ops::AddAssign;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 
 pub type NodeId = usize;
@@ -83,13 +83,12 @@ impl ComputationGraph {
     operation: OpNode,
     input_ids: Vec<NodeId>,
     output_tensor: Tensor,
-  ) -> Result<NodeId, String> {
+  ) -> Result<NodeId> {
     for &input_id in &input_ids {
       if !self.nodes.contains_key(&input_id) {
-        return Err(format!(
-          "Input node {} does not exist in the graph",
-          input_id
-        ));
+        return Err(TensorError::ComputationError {
+          message: format!("Input node {} does not exist in the graph", input_id),
+        });
       }
     }
 
@@ -134,13 +133,13 @@ impl ComputationGraph {
   /// Returns nodes in the order they should be processed for backward propagation
   pub fn reverse_postorder_from(&self, output_id: NodeId) -> Vec<NodeId> {
     let mut visited = HashSet::new();
-    let mut order = Vec::new();
+    let mut order = VecDeque::new();
 
     fn dfs(
       graph: &ComputationGraph,
       node_id: NodeId,
       visited: &mut HashSet<NodeId>,
-      order: &mut Vec<NodeId>,
+      order: &mut VecDeque<NodeId>,
     ) {
       if !visited.insert(node_id) {
         return;
@@ -158,20 +157,15 @@ impl ComputationGraph {
         }
       }
 
-      // Add this node after visiting all its dependencies
-      order.push(node_id);
+      // Add this node to the front to get reverse post-order directly (O(1))
+      order.push_front(node_id);
     }
 
     dfs(self, output_id, &mut visited, &mut order);
-    order.reverse(); // Reverse to get proper backward propagation order
-    order
+    order.into_iter().collect() // Convert VecDeque to Vec
   }
 
-  pub fn backward(
-    &mut self,
-    output_id: NodeId,
-    grad_output: Option<Array2<f64>>,
-  ) -> Result<(), String> {
+  pub fn backward(&mut self, output_id: NodeId, grad_output: Option<Array2<f64>>) -> Result<()> {
     // Use DFS-based traversal for efficiency (only reachable nodes)
     let order = self.reverse_postorder_from(output_id);
     if let Some(output_node) = self.get_node(output_id) {
@@ -183,24 +177,28 @@ impl ComputationGraph {
             let shape = node.tensor.shape();
             let numel = shape.0 * shape.1;
             if numel != 1 {
-              return Err(format!(
-                "grad_output must be specified for non-scalar tensor (shape: {:?})",
-                shape
-              ));
+              return Err(TensorError::GradientError {
+                message: format!(
+                  "grad_output must be specified for non-scalar tensor (shape: {:?})",
+                  shape
+                ),
+              });
             }
             // Default gradient of ones for scalar output only
             Array2::ones(shape)
           }
         };
 
-        if let Some(ref tensor_grad) = node.tensor.grad {
-          *tensor_grad.borrow_mut() = grad;
+        if let Some(ref mut tensor_grad) = node.tensor.grad {
+          *tensor_grad = grad;
         } else {
-          node.tensor.grad = Some(Rc::new(RefCell::new(grad)));
+          node.tensor.grad = Some(grad);
         }
       }
     } else {
-      return Err(format!("Output node {} not found", output_id));
+      return Err(TensorError::ComputationError {
+        message: format!("Output node {} not found", output_id),
+      });
     }
 
     for &node_id in &order {
@@ -216,7 +214,7 @@ impl ComputationGraph {
           let output_grad = {
             let node_ref = node.borrow();
             if let Some(ref grad) = node_ref.tensor.grad {
-              grad.borrow().clone()
+              grad.clone()
             } else {
               continue;
             }
@@ -231,11 +229,12 @@ impl ComputationGraph {
             if let Some(input_node) = self.get_node(input_id) {
               let mut input_ref = input_node.borrow_mut();
               if input_ref.tensor.requires_grad() {
-                if let Some(ref existing_grad) = input_ref.tensor.grad {
-                  let mut grad_borrow = existing_grad.borrow_mut();
-                  grad_borrow.add_assign(&input_grads[i]);
+                if let Some(existing_grad) = input_ref.tensor.grad.as_mut() {
+                  Zip::from(existing_grad)
+                    .and(&input_grads[i])
+                    .for_each(|accum, &incoming| *accum += incoming);
                 } else {
-                  input_ref.tensor.grad = Some(Rc::new(RefCell::new(input_grads[i].clone())));
+                  input_ref.tensor.grad = Some(input_grads[i].clone());
                 }
               }
             }
@@ -274,11 +273,7 @@ impl ComputationGraph {
   pub fn get_node_gradient(&self, node_id: NodeId) -> Option<Array2<f64>> {
     if let Some(node) = self.get_node(node_id) {
       let node_ref = node.borrow();
-      node_ref
-        .tensor
-        .grad
-        .as_ref()
-        .map(|grad| grad.borrow().clone())
+      node_ref.tensor.grad.clone()
     } else {
       None
     }
@@ -357,6 +352,7 @@ mod tests {
     assert!(result.is_err());
     assert!(result
       .unwrap_err()
+      .to_string()
       .contains("grad_output must be specified"));
   }
 
