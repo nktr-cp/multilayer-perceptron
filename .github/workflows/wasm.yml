@@ -46,31 +46,3 @@ jobs:
         path: pkg/
         retention-days: 5
 
-  wasm-size-check:
-    name: WASM Size Check
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout sources
-      uses: actions/checkout@v4
-
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
-      with:
-        targets: wasm32-unknown-unknown
-
-    - name: Install wasm-pack and tools
-      run: |
-        curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-        cargo install twiggy
-
-    - name: Build optimized WASM
-      run: wasm-pack build --target web --out-dir pkg --release
-
-    - name: Analyze WASM size
-      run: |
-        echo "## WASM Package Size Analysis" >> $GITHUB_STEP_SUMMARY
-        echo "### File Sizes" >> $GITHUB_STEP_SUMMARY
-        ls -lh pkg/*.wasm | awk '{print $5 " - " $9}' >> $GITHUB_STEP_SUMMARY
-        
-        echo "### Top Functions by Size" >> $GITHUB_STEP_SUMMARY
-        twiggy top pkg/*.wasm >> $GITHUB_STEP_SUMMARY || echo "twiggy analysis failed" >> $GITHUB_STEP_SUMMARY
