@@ -165,9 +165,62 @@ impl ComputationGraph {
     order.into_iter().collect() // Convert VecDeque to Vec
   }
 
-  pub fn backward(&mut self, output_id: NodeId, grad_output: Option<Array2<f64>>) -> Result<()> {
-    // Use DFS-based traversal for efficiency (only reachable nodes)
-    let order = self.reverse_postorder_from(output_id);
+  /// Accumulate gradient for a specific input node
+  fn accumulate_gradient(&mut self, input_id: NodeId, gradient: &Array2<f64>) {
+    if let Some(input_node) = self.get_node(input_id) {
+      let mut input_ref = input_node.borrow_mut();
+      if input_ref.tensor.requires_grad() {
+        if let Some(existing_grad) = input_ref.tensor.grad.as_mut() {
+          Zip::from(existing_grad)
+            .and(gradient)
+            .for_each(|accum, &incoming| *accum += incoming);
+        } else {
+          input_ref.tensor.grad = Some(gradient.clone());
+        }
+      }
+    }
+  }
+
+  /// Propagate gradients through the computation graph in reverse topological order
+  fn propagate_gradients(&mut self, order: &[NodeId]) -> Result<()> {
+    for &node_id in order {
+      let node = match self.get_node(node_id) {
+        Some(n) => n,
+        None => continue,
+      };
+
+      let producer_edge_id = *node.borrow().producer.borrow();
+
+      if let Some(edge_id) = producer_edge_id {
+        if let Some(edge) = self.get_edge(edge_id) {
+          let output_grad = {
+            let node_ref = node.borrow();
+            if let Some(ref grad) = node_ref.tensor.grad {
+              grad.clone()
+            } else {
+              continue;
+            }
+          };
+
+          let input_grads = edge.operation.backward(&output_grad)?;
+          for (i, &input_id) in edge.inputs.iter().enumerate() {
+            if i >= input_grads.len() {
+              continue;
+            }
+            self.accumulate_gradient(input_id, &input_grads[i]);
+          }
+        }
+      }
+    }
+    Ok(())
+  }
+
+  /// Initialize the gradient for the output node of the computation
+  fn initialize_output_gradient(
+    &mut self,
+    output_id: NodeId,
+    grad_output: Option<Array2<f64>>,
+  ) -> Result<()> {
     if let Some(output_node) = self.get_node(output_id) {
       let mut node = output_node.borrow_mut();
       if node.tensor.requires_grad() {
@@ -200,48 +253,15 @@ impl ComputationGraph {
         message: format!("Output node {} not found", output_id),
       });
     }
+    Ok(())
+  }
 
-    for &node_id in &order {
-      let node = match self.get_node(node_id) {
-        Some(n) => n,
-        None => continue,
-      };
+  pub fn backward(&mut self, output_id: NodeId, grad_output: Option<Array2<f64>>) -> Result<()> {
+    // Use DFS-based traversal for efficiency (only reachable nodes)
+    let order = self.reverse_postorder_from(output_id);
+    self.initialize_output_gradient(output_id, grad_output)?;
 
-      let producer_edge_id = *node.borrow().producer.borrow();
-
-      if let Some(edge_id) = producer_edge_id {
-        if let Some(edge) = self.get_edge(edge_id) {
-          let output_grad = {
-            let node_ref = node.borrow();
-            if let Some(ref grad) = node_ref.tensor.grad {
-              grad.clone()
-            } else {
-              continue;
-            }
-          };
-
-          let input_grads = edge.operation.backward(&output_grad)?;
-          for (i, &input_id) in edge.inputs.iter().enumerate() {
-            if i >= input_grads.len() {
-              continue;
-            }
-
-            if let Some(input_node) = self.get_node(input_id) {
-              let mut input_ref = input_node.borrow_mut();
-              if input_ref.tensor.requires_grad() {
-                if let Some(existing_grad) = input_ref.tensor.grad.as_mut() {
-                  Zip::from(existing_grad)
-                    .and(&input_grads[i])
-                    .for_each(|accum, &incoming| *accum += incoming);
-                } else {
-                  input_ref.tensor.grad = Some(input_grads[i].clone());
-                }
-              }
-            }
-          }
-        }
-      }
-    }
+    self.propagate_gradients(&order)?;
 
     Ok(())
   }
