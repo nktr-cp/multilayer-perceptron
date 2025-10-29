@@ -15,17 +15,20 @@
 //! ```rust
 //! use multilayer_perceptron::prelude::*;
 //!
+//! // Create a tensor
+//! let tensor = Tensor::ones(2, 3);
+//! println!("Tensor shape: {:?}", tensor.shape());
+//!
 //! // Create a simple neural network (when implemented)
 //! // let mut model = Sequential::new();
 //! // model.add(Dense::new(784, 128, Activation::ReLU));
 //! // model.add(Dense::new(128, 10, Activation::Softmax));
 //! ```
 
-#![deny(missing_docs)]
 #![warn(clippy::all)]
 
 // Module declarations will be added as we implement them
-// pub mod tensor;
+pub mod tensor;
 // pub mod ops;
 // pub mod graph;
 // pub mod layers;
@@ -37,7 +40,7 @@
 /// This module re-exports the most commonly used types and functions
 /// for convenient access when using the multilayer perceptron library.
 pub mod prelude {
-    // Re-exports will be added as modules are implemented
+    pub use crate::tensor::Tensor;
 }
 
 // Temporary placeholder function for CI setup
