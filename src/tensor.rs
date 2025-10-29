@@ -117,11 +117,7 @@ impl Tensor {
   }
 
   pub fn grad_at(&self, row: usize, col: usize) -> Option<f64> {
-    if let Some(ref grad) = self.grad {
-      Some(grad.borrow()[[row, col]])
-    } else {
-      None
-    }
+    self.grad.as_ref().map(|grad| grad.borrow()[[row, col]])
   }
 
   pub fn set_grad_at(&self, row: usize, col: usize, value: f64) -> Result<(), String> {

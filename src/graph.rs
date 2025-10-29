@@ -214,7 +214,7 @@ impl ComputationGraph {
         None => continue,
       };
 
-      let producer_edge_id = node.borrow().producer.borrow().clone();
+      let producer_edge_id = *node.borrow().producer.borrow();
 
       if let Some(edge_id) = producer_edge_id {
         if let Some(edge) = self.get_edge(edge_id) {
@@ -279,11 +279,11 @@ impl ComputationGraph {
   pub fn get_node_gradient(&self, node_id: NodeId) -> Option<Array2<f64>> {
     if let Some(node) = self.get_node(node_id) {
       let node_ref = node.borrow();
-      if let Some(ref grad) = node_ref.tensor.grad {
-        Some(grad.borrow().clone())
-      } else {
-        None
-      }
+      node_ref
+        .tensor
+        .grad
+        .as_ref()
+        .map(|grad| grad.borrow().clone())
     } else {
       None
     }
