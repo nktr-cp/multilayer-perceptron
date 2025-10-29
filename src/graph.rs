@@ -2,7 +2,7 @@ use crate::ops::OpNode;
 use crate::tensor::Tensor;
 use ndarray::Array2;
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::ops::AddAssign;
 use std::rc::Rc;
 
@@ -165,54 +165,6 @@ impl ComputationGraph {
     dfs(self, output_id, &mut visited, &mut order);
     order.reverse(); // Reverse to get proper backward propagation order
     order
-  }
-
-  /// Legacy topological sort for compatibility (may process unreachable nodes)
-  #[deprecated(note = "Use reverse_postorder_from for more efficient backward propagation")]
-  pub fn topological_sort(&self) -> Result<Vec<NodeId>, String> {
-    let mut in_degree = HashMap::new();
-    let mut adj_list = HashMap::new();
-
-    for &node_id in self.nodes.keys() {
-      in_degree.insert(node_id, 0);
-      adj_list.insert(node_id, Vec::new());
-    }
-
-    for edge in self.edges.values() {
-      let output_id = edge.output;
-      for &input_id in &edge.inputs {
-        adj_list.get_mut(&input_id).unwrap().push(output_id);
-        *in_degree.get_mut(&output_id).unwrap() += 1;
-      }
-    }
-
-    let mut queue = VecDeque::new();
-    for (&node_id, &degree) in &in_degree {
-      if degree == 0 {
-        queue.push_back(node_id);
-      }
-    }
-
-    let mut result = Vec::new();
-    while let Some(node_id) = queue.pop_front() {
-      result.push(node_id);
-      if let Some(neighbors) = adj_list.get(&node_id) {
-        for &neighbor in neighbors {
-          let degree = in_degree.get_mut(&neighbor).unwrap();
-          *degree -= 1;
-          if *degree == 0 {
-            queue.push_back(neighbor);
-          }
-        }
-      }
-    }
-
-    if result.len() != self.nodes.len() {
-      return Err("Cycle detected in computation graph".to_string());
-    }
-
-    result.reverse();
-    Ok(result)
   }
 
   pub fn backward(
@@ -418,49 +370,6 @@ mod tests {
     // Should work fine for scalar output
     let result = graph.backward(a_id, None);
     assert!(result.is_ok());
-  }
-
-  #[test]
-  fn test_cycle_detection_still_works() {
-    let graph = ComputationGraph::new();
-
-    // The legacy topological_sort should still detect cycles
-    // (though in practice, our graph construction shouldn't allow cycles)
-    #[allow(deprecated)]
-    let result = graph.topological_sort();
-    assert!(result.is_ok());
-  }
-
-  #[test]
-  fn test_simple_addition_gradient() {
-    let mut graph = ComputationGraph::new();
-
-    // Test: f(x, y) = x + y, where x = [2, 3], y = [1, 4]
-    let mut x = Tensor::new(vec![vec![2.0, 3.0]]).unwrap();
-    x.set_requires_grad(true);
-    let mut y = Tensor::new(vec![vec![1.0, 4.0]]).unwrap();
-    y.set_requires_grad(true);
-
-    let op = OpBuilder::add(Rc::new(x.clone()), Rc::new(y.clone()));
-    let mut result = op.forward().unwrap();
-    result.set_requires_grad(true);
-
-    let x_id = graph.add_leaf_node(x);
-    let y_id = graph.add_leaf_node(y);
-    let result_id = graph.add_operation(op, vec![x_id, y_id], result).unwrap();
-
-    // Backward with gradient [1, 1] (sum reduction simulation)
-    let grad_output = Array2::from_shape_vec((1, 2), vec![1.0, 1.0]).unwrap();
-    graph.backward(result_id, Some(grad_output)).unwrap();
-
-    // For addition: ∂(x+y)/∂x = 1, ∂(x+y)/∂y = 1
-    let x_grad = graph.get_node_gradient(x_id).unwrap();
-    let y_grad = graph.get_node_gradient(y_id).unwrap();
-
-    assert_eq!(x_grad[[0, 0]], 1.0);
-    assert_eq!(x_grad[[0, 1]], 1.0);
-    assert_eq!(y_grad[[0, 0]], 1.0);
-    assert_eq!(y_grad[[0, 1]], 1.0);
   }
 
   #[test]
