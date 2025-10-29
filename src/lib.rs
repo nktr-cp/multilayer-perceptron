@@ -40,8 +40,8 @@ pub mod tensor;
 /// This module re-exports the most commonly used types and functions
 /// for convenient access when using the multilayer perceptron library.
 pub mod prelude {
-    pub use crate::ops::{OpBuilder, OpNode};
-    pub use crate::tensor::Tensor;
+  pub use crate::ops::{OpBuilder, OpNode};
+  pub use crate::tensor::Tensor;
 }
 
 // Temporary placeholder function for CI setup
@@ -57,23 +57,23 @@ pub mod prelude {
 /// assert_eq!(add(2, 2), 4);
 /// ```
 pub fn add(left: u64, right: u64) -> u64 {
-    left + right
+  left + right
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+  use super::*;
 
-    #[test]
-    fn test_add() {
-        assert_eq!(add(2, 2), 4);
-        assert_eq!(add(0, 5), 5);
-        assert_eq!(add(10, 15), 25);
-    }
+  #[test]
+  fn test_add() {
+    assert_eq!(add(2, 2), 4);
+    assert_eq!(add(0, 5), 5);
+    assert_eq!(add(10, 15), 25);
+  }
 
-    #[test]
-    fn test_add_edge_cases() {
-        assert_eq!(add(0, 0), 0);
-        assert_eq!(add(u64::MAX - 1, 1), u64::MAX);
-    }
+  #[test]
+  fn test_add_edge_cases() {
+    assert_eq!(add(0, 0), 0);
+    assert_eq!(add(u64::MAX - 1, 1), u64::MAX);
+  }
 }
