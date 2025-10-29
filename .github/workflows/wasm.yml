@@ -40,7 +40,7 @@ jobs:
       # run: wasm-pack test --headless --firefox
 
     - name: Upload WASM artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: wasm-package
         path: pkg/
