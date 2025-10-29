@@ -160,7 +160,7 @@ mod tests {
         for i in 0..2 {
             for j in 0..3 {
                 let value = tensor.data[[i, j]];
-                assert!(value >= -1.0 && value < 1.0);
+                assert!((-1.0..1.0).contains(&value));
             }
         }
     }
