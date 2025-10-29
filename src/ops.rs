@@ -26,13 +26,19 @@ pub enum OpNode {
 impl OpNode {
     pub fn forward(&self) -> Result<Tensor, String> {
         match self {
-            OpNode::MatMul { input_a, input_b } => {
-                Self::forward_matmul(&input_a.data, &input_b.data)
-            }
-            OpNode::Add { input_a, input_b } => Self::forward_add(&input_a.data, &input_b.data),
-            OpNode::Sigmoid { input } => Self::forward_sigmoid(&input.data),
-            OpNode::ReLU { input } => Self::forward_relu(&input.data),
-            OpNode::Tanh { input } => Self::forward_tanh(&input.data),
+            OpNode::MatMul { input_a, input_b } => Self::forward_matmul(
+                &input_a.data,
+                &input_b.data,
+                input_a.requires_grad || input_b.requires_grad,
+            ),
+            OpNode::Add { input_a, input_b } => Self::forward_add(
+                &input_a.data,
+                &input_b.data,
+                input_a.requires_grad || input_b.requires_grad,
+            ),
+            OpNode::Sigmoid { input } => Self::forward_sigmoid(&input.data, input.requires_grad),
+            OpNode::ReLU { input } => Self::forward_relu(&input.data, input.requires_grad),
+            OpNode::Tanh { input } => Self::forward_tanh(&input.data, input.requires_grad),
         }
     }
 
@@ -50,7 +56,11 @@ impl OpNode {
         }
     }
 
-    fn forward_matmul(a: &Array2<f64>, b: &Array2<f64>) -> Result<Tensor, String> {
+    fn forward_matmul(
+        a: &Array2<f64>,
+        b: &Array2<f64>,
+        requires_grad: bool,
+    ) -> Result<Tensor, String> {
         let a_shape = a.dim();
         let b_shape = b.dim();
 
@@ -62,14 +72,23 @@ impl OpNode {
         }
 
         let result = a.dot(b);
+        let result_dim = result.dim();
         Ok(Tensor {
             data: result,
-            grad: None,
-            requires_grad: false,
+            grad: if requires_grad {
+                Some(Array2::zeros(result_dim))
+            } else {
+                None
+            },
+            requires_grad,
         })
     }
 
-    fn forward_add(a: &Array2<f64>, b: &Array2<f64>) -> Result<Tensor, String> {
+    fn forward_add(
+        a: &Array2<f64>,
+        b: &Array2<f64>,
+        requires_grad: bool,
+    ) -> Result<Tensor, String> {
         if a.dim() != b.dim() {
             return Err(format!(
                 "Addition shape mismatch: {:?} + {:?}",
@@ -79,39 +98,59 @@ impl OpNode {
         }
 
         let result = a + b;
+        let result_dim = result.dim();
         Ok(Tensor {
             data: result,
-            grad: None,
-            requires_grad: false,
+            grad: if requires_grad {
+                Some(Array2::zeros(result_dim))
+            } else {
+                None
+            },
+            requires_grad,
         })
     }
 
-    fn forward_sigmoid(input: &Array2<f64>) -> Result<Tensor, String> {
+    fn forward_sigmoid(input: &Array2<f64>, requires_grad: bool) -> Result<Tensor, String> {
         // \frac{1}{1+e^{-x}}
         let result = input.mapv(|x| 1.0 / (1.0 + (-x).exp()));
+        let result_dim = result.dim();
         Ok(Tensor {
             data: result,
-            grad: None,
-            requires_grad: false,
+            grad: if requires_grad {
+                Some(Array2::zeros(result_dim))
+            } else {
+                None
+            },
+            requires_grad,
         })
     }
 
-    fn forward_relu(input: &Array2<f64>) -> Result<Tensor, String> {
+    fn forward_relu(input: &Array2<f64>, requires_grad: bool) -> Result<Tensor, String> {
         let result = input.mapv(|x| x.max(0.0));
+        let result_dim = result.dim();
         Ok(Tensor {
             data: result,
-            grad: None,
-            requires_grad: false,
+            grad: if requires_grad {
+                Some(Array2::zeros(result_dim))
+            } else {
+                None
+            },
+            requires_grad,
         })
     }
 
-    fn forward_tanh(input: &Array2<f64>) -> Result<Tensor, String> {
+    fn forward_tanh(input: &Array2<f64>, requires_grad: bool) -> Result<Tensor, String> {
         // \frac{e^x - e^{-x}}{e^x+e^{-x}}
         let result = input.mapv(|x| x.tanh());
+        let result_dim = result.dim();
         Ok(Tensor {
             data: result,
-            grad: None,
-            requires_grad: false,
+            grad: if requires_grad {
+                Some(Array2::zeros(result_dim))
+            } else {
+                None
+            },
+            requires_grad,
         })
     }
 
