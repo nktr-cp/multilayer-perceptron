@@ -1,3 +1,4 @@
+use crate::error::{Result, TensorError};
 use crate::tensor::Tensor;
 use ndarray::Array2;
 use std::rc::Rc;
@@ -24,7 +25,7 @@ pub enum OpNode {
 }
 
 impl OpNode {
-  pub fn forward(&self) -> Result<Tensor, String> {
+  pub fn forward(&self) -> Result<Tensor> {
     match self {
       OpNode::MatMul { input_a, input_b } => Self::forward_matmul(
         &input_a.data,
@@ -42,7 +43,7 @@ impl OpNode {
     }
   }
 
-  pub fn backward(&self, grad_output: &Array2<f64>) -> Result<Vec<Array2<f64>>, String> {
+  pub fn backward(&self, grad_output: &Array2<f64>) -> Result<Vec<Array2<f64>>> {
     match self {
       OpNode::MatMul { input_a, input_b } => {
         Self::backward_matmul(grad_output, &input_a.data, &input_b.data)
@@ -56,19 +57,16 @@ impl OpNode {
     }
   }
 
-  fn forward_matmul(
-    a: &Array2<f64>,
-    b: &Array2<f64>,
-    requires_grad: bool,
-  ) -> Result<Tensor, String> {
+  fn forward_matmul(a: &Array2<f64>, b: &Array2<f64>, requires_grad: bool) -> Result<Tensor> {
     let a_shape = a.dim();
     let b_shape = b.dim();
 
     if a_shape.1 != b_shape.0 {
-      return Err(format!(
-        "Matrix multiplication dimension mismatch: ({}, {}) * ({}, {})",
-        a_shape.0, a_shape.1, b_shape.0, b_shape.1
-      ));
+      return Err(TensorError::ShapeMismatch {
+        operation: "Matrix multiplication".to_string(),
+        expected: (a_shape.1, b_shape.0),
+        got: (b_shape.0, b_shape.1),
+      });
     }
 
     let result = a.dot(b);
@@ -81,16 +79,18 @@ impl OpNode {
         None
       },
       requires_grad,
+      graph_id: None,
+      graph: None,
     })
   }
 
-  fn forward_add(a: &Array2<f64>, b: &Array2<f64>, requires_grad: bool) -> Result<Tensor, String> {
+  fn forward_add(a: &Array2<f64>, b: &Array2<f64>, requires_grad: bool) -> Result<Tensor> {
     if a.dim() != b.dim() {
-      return Err(format!(
-        "Addition shape mismatch: {:?} + {:?}",
-        a.dim(),
-        b.dim()
-      ));
+      return Err(TensorError::ShapeMismatch {
+        operation: "Addition".to_string(),
+        expected: a.dim(),
+        got: b.dim(),
+      });
     }
 
     let result = a + b;
@@ -103,10 +103,12 @@ impl OpNode {
         None
       },
       requires_grad,
+      graph_id: None,
+      graph: None,
     })
   }
 
-  fn forward_sigmoid(input: &Array2<f64>, requires_grad: bool) -> Result<Tensor, String> {
+  fn forward_sigmoid(input: &Array2<f64>, requires_grad: bool) -> Result<Tensor> {
     // \frac{1}{1+e^{-x}}
     let result = input.mapv(|x| 1.0 / (1.0 + (-x).exp()));
     let result_dim = result.dim();
@@ -118,10 +120,12 @@ impl OpNode {
         None
       },
       requires_grad,
+      graph_id: None,
+      graph: None,
     })
   }
 
-  fn forward_relu(input: &Array2<f64>, requires_grad: bool) -> Result<Tensor, String> {
+  fn forward_relu(input: &Array2<f64>, requires_grad: bool) -> Result<Tensor> {
     let result = input.mapv(|x| x.max(0.0));
     let result_dim = result.dim();
     Ok(Tensor {
@@ -132,10 +136,12 @@ impl OpNode {
         None
       },
       requires_grad,
+      graph_id: None,
+      graph: None,
     })
   }
 
-  fn forward_tanh(input: &Array2<f64>, requires_grad: bool) -> Result<Tensor, String> {
+  fn forward_tanh(input: &Array2<f64>, requires_grad: bool) -> Result<Tensor> {
     // \frac{e^x - e^{-x}}{e^x+e^{-x}}
     let result = input.mapv(|x| x.tanh());
     let result_dim = result.dim();
@@ -147,6 +153,8 @@ impl OpNode {
         None
       },
       requires_grad,
+      graph_id: None,
+      graph: None,
     })
   }
 
@@ -154,7 +162,7 @@ impl OpNode {
     grad_output: &Array2<f64>,
     input_a: &Array2<f64>,
     input_b: &Array2<f64>,
-  ) -> Result<Vec<Array2<f64>>, String> {
+  ) -> Result<Vec<Array2<f64>>> {
     // Matrix multiplication C = AB where A is (m×k), B is (k×n), C is (m×n)
     //
     // Matrix derivative definition: if L = scalar loss function
@@ -175,14 +183,11 @@ impl OpNode {
     grad_output: &Array2<f64>,
     _input_a: &Array2<f64>,
     _input_b: &Array2<f64>,
-  ) -> Result<Vec<Array2<f64>>, String> {
+  ) -> Result<Vec<Array2<f64>>> {
     Ok(vec![grad_output.clone(), grad_output.clone()])
   }
 
-  fn backward_sigmoid(
-    grad_output: &Array2<f64>,
-    input: &Array2<f64>,
-  ) -> Result<Vec<Array2<f64>>, String> {
+  fn backward_sigmoid(grad_output: &Array2<f64>, input: &Array2<f64>) -> Result<Vec<Array2<f64>>> {
     // $\frac{\partial \sigma}{\partial x} = \sigma(x)(1 - \sigma(x))$
     let sigmoid_output = input.mapv(|x| 1.0 / (1.0 + (-x).exp()));
     let sigmoid_grad = sigmoid_output.mapv(|s| s * (1.0 - s));
@@ -190,20 +195,14 @@ impl OpNode {
     Ok(vec![grad_input])
   }
 
-  fn backward_relu(
-    grad_output: &Array2<f64>,
-    input: &Array2<f64>,
-  ) -> Result<Vec<Array2<f64>>, String> {
+  fn backward_relu(grad_output: &Array2<f64>, input: &Array2<f64>) -> Result<Vec<Array2<f64>>> {
     // $\frac{\partial \text{ReLU}}{\partial x} = \begin{cases} 1 & \text{if } x > 0 \\ 0 & \text{otherwise} \end{cases}$
     let relu_grad = input.mapv(|x| if x > 0.0 { 1.0 } else { 0.0 });
     let grad_input = grad_output * &relu_grad;
     Ok(vec![grad_input])
   }
 
-  fn backward_tanh(
-    grad_output: &Array2<f64>,
-    input: &Array2<f64>,
-  ) -> Result<Vec<Array2<f64>>, String> {
+  fn backward_tanh(grad_output: &Array2<f64>, input: &Array2<f64>) -> Result<Vec<Array2<f64>>> {
     // $\frac{\partial \tanh}{\partial x} = 1 - \tanh^2(x)$
     let tanh_output = input.mapv(|x| x.tanh());
     let tanh_grad = tanh_output.mapv(|t| 1.0 - t * t);
@@ -251,8 +250,6 @@ mod tests {
     let op = OpBuilder::matmul(Rc::new(a), Rc::new(b));
     let result = op.forward().unwrap();
 
-    // Expected: [[1*5 + 2*7, 1*6 + 2*8], [3*5 + 4*7, 3*6 + 4*8]]
-    // = [[19, 22], [43, 50]]
     assert_eq!(result.data[[0, 0]], 19.0);
     assert_eq!(result.data[[0, 1]], 22.0);
     assert_eq!(result.data[[1, 0]], 43.0);
@@ -268,7 +265,10 @@ mod tests {
     let result = op.forward();
 
     assert!(result.is_err());
-    assert!(result.unwrap_err().contains("dimension mismatch"));
+    assert!(matches!(
+      result.unwrap_err(),
+      TensorError::ShapeMismatch { .. }
+    ));
   }
 
   #[test]
@@ -280,22 +280,17 @@ mod tests {
 
     let op = OpBuilder::matmul(Rc::new(a.clone()), Rc::new(b.clone()));
 
-    // Gradient from output (2x2)
     let grad_output = Array2::from_shape_vec((2, 2), vec![1.0, 1.0, 1.0, 1.0]).unwrap();
 
     let gradients = op.backward(&grad_output).unwrap();
 
     assert_eq!(gradients.len(), 2); // Two inputs
 
-    // grad_a = grad_output * b^T
-    // b^T = [[5, 7], [6, 8]]
-    // grad_output * b^T = [[1*5+1*6, 1*7+1*8], [1*5+1*6, 1*7+1*8]] = [[11, 15], [11, 15]]
     assert_eq!(gradients[0][[0, 0]], 11.0);
     assert_eq!(gradients[0][[0, 1]], 15.0);
     assert_eq!(gradients[0][[1, 0]], 11.0);
     assert_eq!(gradients[0][[1, 1]], 15.0);
 
-    // grad_b = a^T * grad_output
     // a^T = [[1, 3], [2, 4]]
     // a^T * grad_output = [[1*1+3*1, 1*1+3*1], [2*1+4*1, 2*1+4*1]] = [[4, 4], [6, 6]]
     assert_eq!(gradients[1][[0, 0]], 4.0);
@@ -327,7 +322,10 @@ mod tests {
     let result = op.forward();
 
     assert!(result.is_err());
-    assert!(result.unwrap_err().contains("shape mismatch"));
+    assert!(matches!(
+      result.unwrap_err(),
+      TensorError::ShapeMismatch { .. }
+    ));
   }
 
   #[test]

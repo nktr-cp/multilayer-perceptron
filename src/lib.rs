@@ -28,9 +28,10 @@
 #![warn(clippy::all)]
 
 // Module declarations will be added as we implement them
+pub mod error;
+pub mod graph;
 pub mod ops;
 pub mod tensor;
-// pub mod graph;
 // pub mod layers;
 // pub mod dataset;
 // pub mod train;
@@ -40,6 +41,8 @@ pub mod tensor;
 /// This module re-exports the most commonly used types and functions
 /// for convenient access when using the multilayer perceptron library.
 pub mod prelude {
+  pub use crate::error::{Result, TensorError};
+  pub use crate::graph::{ComputationGraph, EdgeId, GraphEdge, GraphNode, NodeId};
   pub use crate::ops::{OpBuilder, OpNode};
   pub use crate::tensor::Tensor;
 }
