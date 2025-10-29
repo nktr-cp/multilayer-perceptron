@@ -23,7 +23,7 @@ jobs:
       run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
     - name: Cache cargo registry
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           ~/.cargo/registry
@@ -38,7 +38,7 @@ jobs:
       run: wasm-pack test --headless --firefox
 
     - name: Upload WASM artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: wasm-package
         path: pkg/

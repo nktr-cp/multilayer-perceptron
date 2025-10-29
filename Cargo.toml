@@ -10,7 +10,7 @@ documentation = "https://docs.rs/multilayer-perceptron"
 readme = "README.md"
 keywords = ["neural-network", "machine-learning", "autodiff", "wasm", "deep-learning"]
 categories = ["science", "algorithms", "wasm"]
-rust-version = "1.70.0"
+rust-version = "1.75.0"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
