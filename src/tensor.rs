@@ -10,22 +10,19 @@ pub struct Tensor {
 }
 
 impl Tensor {
-    pub fn new(data: Vec<Vec<f64>>) -> Self {
+    pub fn new(data: Vec<Vec<f64>>) -> Result<Self, String> {
         let rows = data.len();
         let cols = if rows > 0 { data[0].len() } else { 0 };
 
-        let mut array = Array2::zeros((rows, cols));
-        for (i, row) in data.iter().enumerate() {
-            for (j, &value) in row.iter().enumerate() {
-                array[[i, j]] = value;
-            }
-        }
+        let flat_data: Vec<f64> = data.into_iter().flat_map(|row| row.into_iter()).collect();
+        let array = Array2::from_shape_vec((rows, cols), flat_data)
+            .map_err(|e| format!("Input data has inconsistent row lengths: {}", e))?;
 
-        Self {
+        Ok(Self {
             data: array,
             grad: None,
             requires_grad: false,
-        }
+        })
     }
 
     pub fn zeros(rows: usize, cols: usize) -> Self {
@@ -110,7 +107,7 @@ mod tests {
     #[test]
     fn test_new() {
         let data = vec![vec![1.0, 2.0], vec![3.0, 4.0]];
-        let tensor = Tensor::new(data);
+        let tensor = Tensor::new(data).expect("Failed to create tensor");
 
         assert_eq!(tensor.shape(), (2, 2));
         assert_eq!(tensor.data[[0, 0]], 1.0);
@@ -119,6 +116,16 @@ mod tests {
         assert_eq!(tensor.data[[1, 1]], 4.0);
         assert!(!tensor.requires_grad());
         assert!(tensor.grad.is_none());
+    }
+
+    #[test]
+    fn test_new_inconsistent_rows() {
+        // Test with inconsistent row lengths
+        let data = vec![vec![1.0, 2.0], vec![3.0, 4.0, 5.0]]; // Second row has 3 elements
+        let result = Tensor::new(data);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("inconsistent row lengths"));
     }
 
     #[test]
