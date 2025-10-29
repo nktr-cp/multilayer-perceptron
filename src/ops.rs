@@ -64,7 +64,7 @@ impl OpNode {
     if a_shape.1 != b_shape.0 {
       return Err(TensorError::ShapeMismatch {
         operation: "Matrix multiplication".to_string(),
-        expected: (a_shape.0, b_shape.0),
+        expected: (a_shape.1, b_shape.0),
         got: (a_shape.0, a_shape.1),
       });
     }

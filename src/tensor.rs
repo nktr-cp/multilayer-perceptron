@@ -199,48 +199,72 @@ impl Tensor {
     })
   }
 
-  // Helper method to add operation to computation graph
-  fn add_to_graph(
-    &self,
-    other: &Tensor,
-    op: crate::ops::OpNode,
-    mut result: Tensor,
-  ) -> Result<Tensor> {
-    // Case 1: Self has a graph and other has a matching node_id
-    if let (Some(self_graph_weak), Some(self_id)) = (&self.graph, self.graph_id) {
-      if let Some(other_id) = other.graph_id {
-        if let Some(graph) = self_graph_weak.upgrade() {
-          let output_id =
-            graph
-              .borrow_mut()
-              .add_operation(op, vec![self_id, other_id], result.clone())?;
-          result.graph = Some(Rc::downgrade(&graph));
-          result.graph_id = Some(output_id);
-          return Ok(result);
+  /// Check if two tensors belong to the same computation graph
+  pub fn same_graph(a: &Tensor, b: &Tensor) -> bool {
+    match (&a.graph, &b.graph) {
+      (Some(a_weak), Some(b_weak)) => {
+        if let (Some(a_graph), Some(b_graph)) = (a_weak.upgrade(), b_weak.upgrade()) {
+          Rc::ptr_eq(&a_graph, &b_graph)
         } else {
-          return Err(TensorError::GraphDropped);
+          false
         }
       }
+      _ => false,
     }
+  }
 
-    // Case 2: Other has a graph and we need to add self to it
-    if let (Some(other_graph_weak), Some(other_id)) = (&other.graph, other.graph_id) {
-      if let Some(graph) = other_graph_weak.upgrade() {
-        let self_id = graph.borrow_mut().add_leaf_node(self.clone());
-        let output_id =
-          graph
-            .borrow_mut()
-            .add_operation(op, vec![self_id, other_id], result.clone())?;
-        result.graph = Some(Rc::downgrade(&graph));
-        result.graph_id = Some(output_id);
-        return Ok(result);
-      } else {
-        return Err(TensorError::GraphDropped);
-      }
-    }
-
-    // Case 3: Neither tensor is tracked, return untracked result
+  /// Add operation to computation graph with proper cross-graph handling
+  fn add_operation_to_graph(
+    graph: Rc<RefCell<ComputationGraph>>,
+    op: crate::ops::OpNode,
+    input_ids: Vec<NodeId>,
+    result: Tensor,
+  ) -> Result<Tensor> {
+    let mut result = result;
+    let output_id = graph
+      .borrow_mut()
+      .add_operation(op, input_ids, result.clone())?;
+    result.graph = Some(Rc::downgrade(&graph));
+    result.graph_id = Some(output_id);
     Ok(result)
+  }
+
+  // Helper method to add operation to computation graph (refactored for readability)
+  fn add_to_graph(&self, other: &Tensor, op: crate::ops::OpNode, result: Tensor) -> Result<Tensor> {
+    match (self.get_graph_info(), other.get_graph_info()) {
+      // Both tensors are tracked
+      (Some((self_graph, self_id)), Some((other_graph, other_id))) => {
+        if Rc::ptr_eq(&self_graph, &other_graph) {
+          // Same graph: directly add operation
+          Self::add_operation_to_graph(self_graph, op, vec![self_id, other_id], result)
+        } else {
+          // Different graphs: merge other into self's graph
+          let other_copied_id = self_graph.borrow_mut().add_leaf_node(other.clone());
+          Self::add_operation_to_graph(self_graph, op, vec![self_id, other_copied_id], result)
+        }
+      }
+      // Only self has a graph
+      (Some((graph, self_id)), None) => {
+        let other_id = graph.borrow_mut().add_leaf_node(other.clone());
+        Self::add_operation_to_graph(graph, op, vec![self_id, other_id], result)
+      }
+      // Only other has a graph
+      (None, Some((graph, other_id))) => {
+        let self_id = graph.borrow_mut().add_leaf_node(self.clone());
+        Self::add_operation_to_graph(graph, op, vec![self_id, other_id], result)
+      }
+      // Neither tensor is tracked
+      (None, None) => Ok(result),
+    }
+  }
+
+  /// Get graph and node_id as a tuple if tensor is tracked
+  fn get_graph_info(&self) -> Option<(Rc<RefCell<ComputationGraph>>, NodeId)> {
+    if let (Some(graph_weak), Some(node_id)) = (&self.graph, self.graph_id) {
+      graph_weak.upgrade().map(|graph| (graph, node_id))
+    } else {
+      None
+    }
   }
 
   // Helper method for unary operations
@@ -564,4 +588,86 @@ mod tests {
       assert!(bias_grad[[0, 0]] != 0.0);
     }
   }
+}
+
+#[test]
+fn test_cross_graph_operation() {
+  use crate::graph::ComputationGraph;
+  use std::cell::RefCell;
+  use std::rc::Rc;
+
+  let graph_a = Rc::new(RefCell::new(ComputationGraph::new()));
+  let graph_b = Rc::new(RefCell::new(ComputationGraph::new()));
+
+  let mut x = Tensor::ones(2, 2);
+  x.set_requires_grad(true);
+  let x = x.with_graph(graph_a.clone());
+
+  let mut y = Tensor::ones(2, 2);
+  y.set_requires_grad(true);
+  let y = y.with_graph(graph_b.clone());
+
+  // Should merge y into x's graph
+  let z = x.add(&y).unwrap();
+
+  // z should be in x's graph
+  assert!(z.is_tracked());
+  assert!(Tensor::same_graph(&x, &z));
+
+  // y's original graph should still exist
+  assert_eq!(graph_b.borrow().node_count(), 1); // Only y
+
+  // x's graph should have x, y (as leaf), and z
+  assert_eq!(graph_a.borrow().node_count(), 3);
+}
+
+#[test]
+fn test_same_graph_operation() {
+  use crate::graph::ComputationGraph;
+  use std::cell::RefCell;
+  use std::rc::Rc;
+
+  let graph = Rc::new(RefCell::new(ComputationGraph::new()));
+
+  let mut x = Tensor::ones(2, 2);
+  x.set_requires_grad(true);
+  let x = x.with_graph(graph.clone());
+
+  let mut y = Tensor::ones(2, 2);
+  y.set_requires_grad(true);
+  let y = y.with_graph(graph.clone());
+
+  // Should work without merging
+  let z = x.add(&y).unwrap();
+
+  assert!(z.is_tracked());
+  assert!(Tensor::same_graph(&x, &y));
+  assert!(Tensor::same_graph(&x, &z));
+
+  // Graph should have x, y, z
+  assert_eq!(graph.borrow().node_count(), 3);
+}
+
+#[test]
+fn test_untracked_with_tracked() {
+  use crate::graph::ComputationGraph;
+  use std::cell::RefCell;
+  use std::rc::Rc;
+
+  let graph = Rc::new(RefCell::new(ComputationGraph::new()));
+
+  let mut x = Tensor::ones(2, 2);
+  x.set_requires_grad(true);
+  let x = x.with_graph(graph.clone());
+
+  let y = Tensor::ones(2, 2); // Untracked
+
+  // y should be added to x's graph
+  let z = x.add(&y).unwrap();
+
+  assert!(z.is_tracked());
+  assert!(Tensor::same_graph(&x, &z));
+
+  // Graph should have x, y (as leaf), z
+  assert_eq!(graph.borrow().node_count(), 3);
 }
