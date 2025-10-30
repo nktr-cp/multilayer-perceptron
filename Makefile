@@ -15,17 +15,17 @@ install:
 # Build WebAssembly module for web target
 build-wasm:
 	@echo "Building WebAssembly module..."
-	wasm-pack build --target web --out-dir pkg --release
+	RUSTFLAGS="--cfg=web_sys_unstable_apis" wasm-pack build --target web --out-dir pkg --release
 
 # Build WebAssembly module for Node.js target  
 build-node:
 	@echo "Building WebAssembly module for Node.js..."
-	wasm-pack build --target nodejs --out-dir pkg-node --release
+	RUSTFLAGS="--cfg=web_sys_unstable_apis" wasm-pack build --target nodejs --out-dir pkg-node --release
 
 # Build WebAssembly module for bundlers
 build-bundler:
 	@echo "Building WebAssembly module for bundlers..."
-	wasm-pack build --target bundler --out-dir pkg-bundler --release
+	RUSTFLAGS="--cfg=web_sys_unstable_apis" wasm-pack build --target bundler --out-dir pkg-bundler --release
 
 # Build all targets
 build: build-wasm build-node build-bundler
@@ -93,19 +93,19 @@ release: clean
 	CARGO_PROFILE_RELEASE_LTO=true \
 	CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
 	CARGO_PROFILE_RELEASE_PANIC=abort \
-	wasm-pack build --target web --out-dir pkg --release
-	wasm-pack build --target nodejs --out-dir pkg-node --release
-	wasm-pack build --target bundler --out-dir pkg-bundler --release
+	RUSTFLAGS="--cfg=web_sys_unstable_apis" wasm-pack build --target web --out-dir pkg --release
+	RUSTFLAGS="--cfg=web_sys_unstable_apis" wasm-pack build --target nodejs --out-dir pkg-node --release
+	RUSTFLAGS="--cfg=web_sys_unstable_apis" wasm-pack build --target bundler --out-dir pkg-bundler --release
 	npm run build:demo
 
 # Build for GitHub Pages deployment
 build-pages: clean install
 	@echo "Building for GitHub Pages deployment..."
 	@echo "Building optimized WebAssembly..."
-	wasm-pack build --target web --out-dir pkg --release
+	RUSTFLAGS="--cfg=web_sys_unstable_apis" wasm-pack build --target web --out-dir pkg --release
 	@echo "Optimizing WebAssembly file size..."
 	@if command -v wasm-opt >/dev/null 2>&1; then \
-		wasm-opt -Os pkg/multilayer_perceptron_bg.wasm -o pkg/multilayer_perceptron_bg.wasm; \
+		wasm-opt -Os --enable-bulk-memory --enable-reference-types pkg/multilayer_perceptron_bg.wasm -o pkg/multilayer_perceptron_bg.wasm; \
 		echo "WebAssembly optimized with wasm-opt"; \
 	else \
 		echo "wasm-opt not found, skipping optimization"; \

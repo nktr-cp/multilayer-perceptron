@@ -56,7 +56,11 @@ module.exports = (env, argv) => {
       new WasmPackPlugin({
         crateDirectory: path.resolve(__dirname, '.'),
         outDir: path.resolve(__dirname, 'pkg'),
-        extraArgs: isProduction ? '--target web --release' : '--target web'
+        extraArgs: isProduction ? '--target web --release' : '--target web',
+        forceMode: isProduction ? 'production' : 'development',
+        env: {
+          RUSTFLAGS: '--cfg=web_sys_unstable_apis'
+        }
       }),
       new CopyWebpackPlugin({
         patterns: [

@@ -59,9 +59,9 @@ jobs:
 
       - name: Build WASM package
         run: |
-          wasm-pack build --target web --out-dir pkg --release
-          # Optimize WASM file size
-          wasm-opt -Os pkg/multilayer_perceptron_bg.wasm -o pkg/multilayer_perceptron_bg.wasm || echo "wasm-opt not available, skipping optimization"
+          RUSTFLAGS="--cfg=web_sys_unstable_apis" wasm-pack build --target web --out-dir pkg --release
+          # Optimize WASM file size with bulk memory and reference types support
+          wasm-opt -Os --enable-bulk-memory --enable-reference-types pkg/multilayer_perceptron_bg.wasm -o pkg/multilayer_perceptron_bg.wasm || echo "wasm-opt not available, skipping optimization"
 
       - name: Build for production
         run: npm run build:pages
