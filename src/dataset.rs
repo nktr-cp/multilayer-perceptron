@@ -430,7 +430,7 @@ impl DataLoader {
     Some(batch_dataset.to_tensors())
   }
 
-  pub fn batches(&mut self) -> DataLoaderIterator {
+  pub fn batches(&mut self) -> DataLoaderIterator<'_> {
     self.reset();
     DataLoaderIterator { loader: self }
   }
