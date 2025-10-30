@@ -95,6 +95,30 @@ impl Tensor {
     }
   }
 
+  /// Create tensor from Array2
+  pub fn from_array2(data: Array2<f64>) -> Result<Self> {
+    Ok(Self {
+      data,
+      grad: None,
+      requires_grad: false,
+      graph_id: None,
+      graph: None,
+    })
+  }
+
+  /// Create tensor from Array1 (as column vector)
+  pub fn from_array1(data: ndarray::Array1<f64>) -> Result<Self> {
+    let rows = data.len();
+    let data_2d = data.to_shape((rows, 1))?.to_owned();
+    Ok(Self {
+      data: data_2d,
+      grad: None,
+      requires_grad: false,
+      graph_id: None,
+      graph: None,
+    })
+  }
+
   pub fn shape(&self) -> (usize, usize) {
     let shape = self.data.dim();
     (shape.0, shape.1)

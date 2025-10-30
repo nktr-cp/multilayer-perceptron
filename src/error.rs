@@ -3,7 +3,7 @@
 use std::fmt;
 
 /// Comprehensive error type for tensor operations and computation graph operations
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug)]
 pub enum TensorError {
   /// Shape mismatch during tensor operations
   ShapeMismatch {
@@ -32,6 +32,18 @@ pub enum TensorError {
 
   /// Generic computational error
   ComputationError { message: String },
+
+  /// Invalid value encountered during data processing
+  InvalidValue(String),
+
+  /// Dimension mismatch in array operations
+  DimensionMismatch(String),
+
+  /// IO error (file not found, read error, etc.)
+  IoError(std::io::Error),
+
+  /// CSV parsing error
+  CsvError(csv::Error),
 }
 
 impl fmt::Display for TensorError {
@@ -80,6 +92,18 @@ impl fmt::Display for TensorError {
       TensorError::ComputationError { message } => {
         write!(f, "Computation error: {}", message)
       }
+      TensorError::InvalidValue(message) => {
+        write!(f, "Invalid value: {}", message)
+      }
+      TensorError::DimensionMismatch(message) => {
+        write!(f, "Dimension mismatch: {}", message)
+      }
+      TensorError::IoError(error) => {
+        write!(f, "IO error: {}", error)
+      }
+      TensorError::CsvError(error) => {
+        write!(f, "CSV error: {}", error)
+      }
     }
   }
 }
@@ -99,6 +123,20 @@ impl From<ndarray::ShapeError> for TensorError {
 impl From<String> for TensorError {
   fn from(message: String) -> Self {
     TensorError::ComputationError { message }
+  }
+}
+
+/// Convert IO errors into TensorError
+impl From<std::io::Error> for TensorError {
+  fn from(error: std::io::Error) -> Self {
+    TensorError::IoError(error)
+  }
+}
+
+/// Convert CSV errors into TensorError
+impl From<csv::Error> for TensorError {
+  fn from(error: csv::Error) -> Self {
+    TensorError::CsvError(error)
   }
 }
 
