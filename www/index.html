@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <title>Multilayer Perceptron WebAssembly Demo</title>
     <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
 </head>
 <body>
     <div class="container">
@@ -16,24 +17,110 @@
             <h2>🎯 Binary Classification Demo</h2>
             
             <div class="controls">
-                <div class="control-group">
-                    <label for="learning-rate">Learning Rate:</label>
-                    <input type="number" id="learning-rate" value="0.01" min="0.001" max="1" step="0.001">
+                <div class="hyperparameters-section">
+                    <h4>🎛️ Hyperparameters</h4>
+                    <div class="param-grid">
+                        <div class="control-group">
+                            <label for="learning-rate">Learning Rate:</label>
+                            <input type="number" id="learning-rate" value="0.01" min="0.0001" max="1" step="0.0001">
+                            <small>Recommended: 0.001 - 0.1</small>
+                        </div>
+                        
+                        <div class="control-group">
+                            <label for="epochs">Epochs:</label>
+                            <input type="number" id="epochs" value="100" min="1" max="2000" step="1">
+                            <small>Training iterations</small>
+                        </div>
+                        
+                        <div class="control-group">
+                            <label for="batch-size">Batch Size:</label>
+                            <input type="number" id="batch-size" value="32" min="1" max="128" step="1">
+                            <small>Samples per batch</small>
+                        </div>
+                        
+                        <div class="control-group">
+                            <label for="hidden-size">Hidden Layer Size:</label>
+                            <input type="number" id="hidden-size" value="64" min="4" max="512" step="4">
+                            <small>Number of neurons</small>
+                        </div>
+                        
+                        <div class="control-group">
+                            <label for="validation-split">Validation Split:</label>
+                            <input type="number" id="validation-split" value="0.2" min="0.1" max="0.4" step="0.05">
+                            <small>Portion for validation</small>
+                        </div>
+                        
+                        <div class="control-group">
+                            <label for="momentum">Momentum:</label>
+                            <input type="number" id="momentum" value="0.9" min="0" max="0.99" step="0.01">
+                            <small>SGD momentum factor</small>
+                        </div>
+                    </div>
                 </div>
                 
-                <div class="control-group">
-                    <label for="epochs">Epochs:</label>
-                    <input type="number" id="epochs" value="100" min="1" max="1000" step="1">
+                <div class="data-generation-section">
+                    <h4>🎯 Dataset Configuration</h4>
+                    <div class="param-grid">
+                        <div class="control-group">
+                            <label for="dataset-type">Dataset Type:</label>
+                            <select id="dataset-type">
+                                <option value="diagonal">Diagonal Clusters (Easy)</option>
+                                <option value="circular">Circular Boundary (Medium)</option>
+                                <option value="xor">XOR Pattern (Hard)</option>
+                                <option value="spiral">Spiral Pattern (Very Hard)</option>
+                                <option value="moons">Two Moons (Medium)</option>
+                            </select>
+                            <small>Choose pattern complexity</small>
+                        </div>
+                        
+                        <div class="control-group">
+                            <label for="noise-level">Noise Level:</label>
+                            <input type="number" id="noise-level" value="0.1" min="0" max="0.5" step="0.05">
+                            <small>Add randomness to data</small>
+                        </div>
+                        
+                        <div class="control-group">
+                            <label for="num-samples">Samples per Class:</label>
+                            <input type="number" id="num-samples" value="200" min="50" max="500" step="50">
+                            <small>Total samples will be 2x</small>
+                        </div>
+                    </div>
                 </div>
                 
-                <div class="control-group">
-                    <label for="hidden-size">Hidden Layer Size:</label>
-                    <input type="number" id="hidden-size" value="64" min="1" max="256" step="1">
+                <div class="dataset-options">
+                    <h4>📊 Dataset Configuration</h4>
+                    <div class="dataset-grid">
+                        <div class="control-group">
+                            <label for="dataset-type">Dataset Type:</label>
+                            <select id="dataset-type">
+                                <option value="diagonal">Diagonal Clusters (Easy)</option>
+                                <option value="circular">Circular Boundary (Medium)</option>
+                                <option value="xor">XOR Pattern (Hard)</option>
+                                <option value="moons">Two Moons (Medium)</option>
+                                <option value="spiral">Spiral Pattern (Very Hard)</option>
+                            </select>
+                        </div>
+                        
+                        <div class="control-group">
+                            <label for="num-samples">Samples per Class:</label>
+                            <input type="number" id="num-samples" value="100" min="20" max="500" step="10">
+                            <small>Total samples = 2 × this value</small>
+                        </div>
+                        
+                        <div class="control-group">
+                            <label for="noise-level">Noise Level:</label>
+                            <input type="number" id="noise-level" value="0.1" min="0" max="0.5" step="0.05">
+                            <small>Higher = more overlap</small>
+                        </div>
+                    </div>
                 </div>
                 
-                <button id="start-training" class="btn-primary">Start Training</button>
-                <button id="stop-training" class="btn-secondary" disabled>Stop Training</button>
-                <button id="generate-data" class="btn-tertiary">Generate New Data</button>
+                <div class="action-buttons">
+                    <button id="start-training" class="btn-primary">🚀 Start Training</button>
+                    <button id="stop-training" class="btn-secondary" disabled>⏹️ Stop Training</button>
+                    <button id="generate-data" class="btn-tertiary">🎲 Generate New Data</button>
+                    <button id="reset-charts" class="btn-quaternary">🔄 Reset Charts</button>
+                </div>
             </div>
 
             <div class="data-section">
@@ -53,6 +140,18 @@
 
             <div class="training-section">
                 <h3>📈 Training Progress</h3>
+                
+                <div class="training-status">
+                    <div class="status-indicator">
+                        <div id="status-light" class="status-light stopped"></div>
+                        <span id="training-status-text">Ready to train</span>
+                    </div>
+                    <div class="elapsed-time">
+                        <label>Elapsed:</label>
+                        <span id="elapsed-time">00:00</span>
+                    </div>
+                </div>
+                
                 <div class="progress-info">
                     <div class="metric">
                         <label>Epoch:</label>
@@ -61,16 +160,51 @@
                     <div class="metric">
                         <label>Loss:</label>
                         <span id="current-loss">0.000</span>
+                        <div class="trend-indicator" id="loss-trend">—</div>
                     </div>
                     <div class="metric">
                         <label>Accuracy:</label>
                         <span id="current-accuracy">0.0%</span>
+                        <div class="trend-indicator" id="accuracy-trend">—</div>
+                    </div>
+                    <div class="metric">
+                        <label>Val Loss:</label>
+                        <span id="current-val-loss">0.000</span>
+                        <div class="trend-indicator" id="val-loss-trend">—</div>
+                    </div>
+                    <div class="metric">
+                        <label>Val Accuracy:</label>
+                        <span id="current-val-accuracy">0.0%</span>
+                        <div class="trend-indicator" id="val-accuracy-trend">—</div>
+                    </div>
+                    <div class="metric">
+                        <label>Best Acc:</label>
+                        <span id="best-accuracy">0.0%</span>
+                        <small>@epoch <span id="best-epoch">0</span></small>
                     </div>
                 </div>
-                <div class="progress-bar">
-                    <div id="progress-fill"></div>
+                
+                <div class="progress-bar-container">
+                    <div class="progress-bar">
+                        <div id="progress-fill"></div>
+                        <div class="progress-text" id="progress-text">0%</div>
+                    </div>
+                    <div class="eta">
+                        <label>ETA:</label>
+                        <span id="eta-time">--:--</span>
+                    </div>
                 </div>
-                <canvas id="loss-chart" width="600" height="300"></canvas>
+                
+                <div class="charts-container">
+                    <div class="chart-wrapper">
+                        <h4>📉 Loss Curves</h4>
+                        <canvas id="loss-chart"></canvas>
+                    </div>
+                    <div class="chart-wrapper">
+                        <h4>📈 Accuracy Curves</h4>
+                        <canvas id="accuracy-chart"></canvas>
+                    </div>
+                </div>
             </div>
 
             <div class="prediction-section">
