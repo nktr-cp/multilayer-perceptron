@@ -48,6 +48,27 @@ pub trait Layer: Debug {
   fn param_count(&self) -> usize;
   fn name(&self) -> &'static str;
   fn clone_layer(&self) -> Box<dyn Layer>;
+  fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+
+  /// Get mutable references to parameters (for optimizer)
+  fn parameters_mut(&mut self) -> Vec<&mut Tensor> {
+    Vec::new()
+  }
+
+  /// Zero out gradients for this layer
+  fn zero_gradients(&mut self) {
+    for param in self.parameters_mut() {
+      param.zero_grad();
+    }
+  }
+
+  /// Sync gradients from computation graph
+  fn sync_gradients(&mut self) -> Result<()> {
+    for param in self.parameters_mut() {
+      param.sync_gradient_from_graph()?;
+    }
+    Ok(())
+  }
 }
 
 impl Clone for Box<dyn Layer> {
@@ -58,11 +79,11 @@ impl Clone for Box<dyn Layer> {
 
 #[derive(Debug, Clone)]
 pub struct DenseLayer {
-  pub weights: Tensor,
-  pub bias: Tensor,
-  pub activation: Activation,
-  pub input_size: usize,
-  pub output_size: usize,
+  weights: Tensor,
+  bias: Tensor,
+  activation: Activation,
+  input_size: usize,
+  output_size: usize,
 }
 
 impl DenseLayer {
@@ -168,6 +189,20 @@ impl DenseLayer {
     self.weights.set_requires_grad(true);
     self.bias.set_requires_grad(true);
   }
+
+  /// Connect layer parameters to computation graph
+  pub fn connect_to_graph(
+    &mut self,
+    graph: std::rc::Rc<std::cell::RefCell<crate::graph::ComputationGraph>>,
+  ) {
+    // Ensure tensors require gradients before registering them with the graph so the
+    // graph copies also retain the proper requires_grad flag.
+    self.weights.set_requires_grad(true);
+    self.bias.set_requires_grad(true);
+
+    self.weights = self.weights.clone().with_graph(graph.clone());
+    self.bias = self.bias.clone().with_graph(graph.clone());
+  }
 }
 
 impl Layer for DenseLayer {
@@ -196,6 +231,14 @@ impl Layer for DenseLayer {
 
   fn clone_layer(&self) -> Box<dyn Layer> {
     Box::new(self.clone())
+  }
+
+  fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+    self
+  }
+
+  fn parameters_mut(&mut self) -> Vec<&mut Tensor> {
+    vec![&mut self.weights, &mut self.bias]
   }
 }
 
@@ -453,7 +496,15 @@ impl Sequential {
     mut self,
     graph: std::rc::Rc<std::cell::RefCell<crate::graph::ComputationGraph>>,
   ) -> Self {
-    self.graph = Some(graph);
+    self.graph = Some(graph.clone());
+
+    // Connect all layer parameters to the computation graph
+    for layer in &mut self.layers {
+      if let Some(dense_layer) = layer.as_any_mut().downcast_mut::<DenseLayer>() {
+        dense_layer.connect_to_graph(graph.clone());
+      }
+    }
+
     self
   }
 
@@ -598,6 +649,30 @@ impl Sequential {
       layers: layer_info,
       total_params,
     }
+  }
+
+  /// Zero gradients for all parameters
+  pub fn zero_grad(&mut self) {
+    for layer in &mut self.layers {
+      layer.zero_gradients();
+    }
+  }
+
+  /// Get all trainable parameters in the model
+  pub fn parameters_mut(&mut self) -> Vec<&mut Tensor> {
+    let mut params = Vec::new();
+    for layer in &mut self.layers {
+      params.extend(layer.parameters_mut());
+    }
+    params
+  }
+
+  /// Sync gradients from computation graph for all layers
+  pub fn sync_gradients(&mut self) -> Result<()> {
+    for layer in &mut self.layers {
+      layer.sync_gradients()?;
+    }
+    Ok(())
   }
 }
 

@@ -25,6 +25,9 @@ pub enum OpNode {
   Softmax {
     input: Rc<Tensor>,
   },
+  Mean {
+    input: Rc<Tensor>,
+  },
 }
 
 impl OpNode {
@@ -44,6 +47,7 @@ impl OpNode {
       OpNode::ReLU { input } => Self::forward_relu(&input.data, input.requires_grad),
       OpNode::Tanh { input } => Self::forward_tanh(&input.data, input.requires_grad),
       OpNode::Softmax { input } => Self::forward_softmax(&input.data, input.requires_grad),
+      OpNode::Mean { input } => Self::forward_mean(&input.data, input.requires_grad),
     }
   }
 
@@ -59,6 +63,7 @@ impl OpNode {
       OpNode::ReLU { input } => Self::backward_relu(grad_output, &input.data),
       OpNode::Tanh { input } => Self::backward_tanh(grad_output, &input.data),
       OpNode::Softmax { input } => Self::backward_softmax(grad_output, &input.data),
+      OpNode::Mean { input } => Self::backward_mean(grad_output, &input.data),
     }
   }
 
@@ -90,20 +95,19 @@ impl OpNode {
   }
 
   fn forward_add(a: &Array2<f64>, b: &Array2<f64>, requires_grad: bool) -> Result<Tensor> {
-    if a.dim() != b.dim() {
-      return Err(TensorError::ShapeMismatch {
-        operation: "Addition".to_string(),
-        expected: a.dim(),
-        got: b.dim(),
-      });
-    }
+    let a_shape = a.dim();
+    let b_shape = b.dim();
 
-    let result = a + b;
-    let result_dim = result.dim();
+    // Check if broadcasting is possible and compute output shape
+    let output_shape = Self::broadcast_shapes(a_shape, b_shape)?;
+
+    // Perform broadcasting addition
+    let result = Self::broadcast_add(a, b, output_shape)?;
+
     Ok(Tensor {
       data: result,
       grad: if requires_grad {
-        Some(Array2::zeros(result_dim))
+        Some(Array2::zeros(output_shape))
       } else {
         None
       },
@@ -187,6 +191,24 @@ impl OpNode {
     })
   }
 
+  fn forward_mean(input: &Array2<f64>, requires_grad: bool) -> Result<Tensor> {
+    let sum: f64 = input.iter().sum();
+    let count = input.len() as f64;
+    let mean_val = sum / count;
+
+    Ok(Tensor {
+      data: Array2::from_elem((1, 1), mean_val),
+      grad: if requires_grad {
+        Some(Array2::zeros((1, 1)))
+      } else {
+        None
+      },
+      requires_grad,
+      graph_id: None,
+      graph: None,
+    })
+  }
+
   fn backward_matmul(
     grad_output: &Array2<f64>,
     input_a: &Array2<f64>,
@@ -210,10 +232,13 @@ impl OpNode {
 
   fn backward_add(
     grad_output: &Array2<f64>,
-    _input_a: &Array2<f64>,
-    _input_b: &Array2<f64>,
+    input_a: &Array2<f64>,
+    input_b: &Array2<f64>,
   ) -> Result<Vec<Array2<f64>>> {
-    Ok(vec![grad_output.clone(), grad_output.clone()])
+    // For broadcasting, we need to sum gradients along broadcasted dimensions
+    let grad_a = Self::reduce_broadcasted_gradient(grad_output, input_a.dim())?;
+    let grad_b = Self::reduce_broadcasted_gradient(grad_output, input_b.dim())?;
+    Ok(vec![grad_a, grad_b])
   }
 
   fn backward_sigmoid(grad_output: &Array2<f64>, input: &Array2<f64>) -> Result<Vec<Array2<f64>>> {
@@ -271,6 +296,116 @@ impl OpNode {
 
     Ok(vec![grad_input])
   }
+
+  fn backward_mean(grad_output: &Array2<f64>, input: &Array2<f64>) -> Result<Vec<Array2<f64>>> {
+    // For mean, the gradient is uniformly distributed across all input elements
+    // ∂(mean(x))/∂x_i = 1/N where N is the total number of elements
+    let total_elements = input.len() as f64;
+    let grad_per_element = grad_output[[0, 0]] / total_elements;
+    let grad_input = Array2::from_elem(input.dim(), grad_per_element);
+
+    Ok(vec![grad_input])
+  }
+
+  /// Compute the output shape for broadcasting two arrays
+  fn broadcast_shapes(a_shape: (usize, usize), b_shape: (usize, usize)) -> Result<(usize, usize)> {
+    // Broadcasting rules (similar to NumPy):
+    // 1. Compare dimensions from right to left
+    // 2. Dimensions are compatible if they are equal or one of them is 1
+
+    let (a_rows, a_cols) = a_shape;
+    let (b_rows, b_cols) = b_shape;
+
+    // Columns must match exactly for stability (bias broadcasting only occurs across rows)
+    let output_cols = if a_cols == b_cols {
+      a_cols
+    } else {
+      return Err(TensorError::ShapeMismatch {
+        operation: "Broadcasting Addition".to_string(),
+        expected: a_shape,
+        got: b_shape,
+      });
+    };
+
+    // Check row compatibility
+    let output_rows = if a_rows == b_rows {
+      a_rows
+    } else if a_rows == 1 {
+      b_rows
+    } else if b_rows == 1 {
+      a_rows
+    } else {
+      return Err(TensorError::ShapeMismatch {
+        operation: "Broadcasting Addition".to_string(),
+        expected: a_shape,
+        got: b_shape,
+      });
+    };
+
+    Ok((output_rows, output_cols))
+  }
+
+  /// Perform broadcasted addition
+  fn broadcast_add(
+    a: &Array2<f64>,
+    b: &Array2<f64>,
+    output_shape: (usize, usize),
+  ) -> Result<Array2<f64>> {
+    let (output_rows, output_cols) = output_shape;
+    let mut result = Array2::zeros(output_shape);
+
+    for i in 0..output_rows {
+      for j in 0..output_cols {
+        let a_i = if a.nrows() == 1 { 0 } else { i };
+        let a_j = if a.ncols() == 1 { 0 } else { j };
+        let b_i = if b.nrows() == 1 { 0 } else { i };
+        let b_j = if b.ncols() == 1 { 0 } else { j };
+
+        result[[i, j]] = a[[a_i, a_j]] + b[[b_i, b_j]];
+      }
+    }
+
+    Ok(result)
+  }
+
+  /// Reduce broadcasted gradient to match original input shape
+  fn reduce_broadcasted_gradient(
+    grad_output: &Array2<f64>,
+    input_shape: (usize, usize),
+  ) -> Result<Array2<f64>> {
+    let (input_rows, input_cols) = input_shape;
+    let (grad_rows, grad_cols) = grad_output.dim();
+
+    // If shapes match, no reduction needed
+    if input_rows == grad_rows && input_cols == grad_cols {
+      return Ok(grad_output.clone());
+    }
+
+    let mut result = Array2::zeros(input_shape);
+
+    // Sum along broadcasted dimensions
+    for i in 0..input_rows {
+      for j in 0..input_cols {
+        let mut grad_sum = 0.0;
+
+        // Sum over all positions that this input element affected
+        let row_start = if input_rows == 1 { 0 } else { i };
+        let row_end = if input_rows == 1 { grad_rows } else { i + 1 };
+        let col_start = if input_cols == 1 { 0 } else { j };
+        let col_end = if input_cols == 1 { grad_cols } else { j + 1 };
+
+        for gi in row_start..row_end {
+          for gj in col_start..col_end {
+            grad_sum += grad_output[[gi, gj]];
+          }
+        }
+
+        result[[i, j]] = grad_sum;
+      }
+    }
+
+    Ok(result)
+  }
 }
 
 pub struct OpBuilder;
@@ -298,6 +433,10 @@ impl OpBuilder {
 
   pub fn softmax(input: Rc<Tensor>) -> OpNode {
     OpNode::Softmax { input }
+  }
+
+  pub fn mean(input: Rc<Tensor>) -> OpNode {
+    OpNode::Mean { input }
   }
 }
 
