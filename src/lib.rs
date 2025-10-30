@@ -43,9 +43,12 @@ pub mod error;
 pub mod generic_dataset;
 pub mod graph;
 pub mod layers;
+pub mod loss;
+pub mod metrics;
 pub mod ops;
+pub mod optimizer;
 pub mod tensor;
-// pub mod train;
+pub mod trainer;
 
 /// Prelude module for convenient imports
 ///
@@ -61,8 +64,14 @@ pub mod prelude {
   pub use crate::layers::{
     Activation, DenseLayer, Layer, LayerInfo, ModelSummary, Sequential, WeightInit,
   };
+  pub use crate::loss::{BinaryCrossEntropy, Loss, MeanSquaredError};
+  pub use crate::metrics::{
+    Accuracy, BinaryClassificationMetrics, F1Score, Metric, Precision, Recall,
+  };
   pub use crate::ops::{OpBuilder, OpNode};
+  pub use crate::optimizer::{GradientDescent, Optimizer, SGDMomentum, SGD};
   pub use crate::tensor::Tensor;
+  pub use crate::trainer::{EpochHistory, Trainer, TrainingConfig, TrainingHistory};
 }
 
 // Temporary placeholder function for CI setup
