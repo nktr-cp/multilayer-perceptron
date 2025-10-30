@@ -1,0 +1,47 @@
+{
+  "name": "multilayer-perceptron-wasm",
+  "version": "0.1.0",
+  "description": "WebAssembly bindings for multilayer perceptron neural network",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "scripts": {
+    "build": "wasm-pack build --target web --out-dir pkg",
+    "build:node": "wasm-pack build --target nodejs --out-dir pkg-node",
+    "build:bundler": "wasm-pack build --target bundler --out-dir pkg-bundler", 
+    "dev": "webpack serve --mode development",
+    "build:demo": "webpack --mode production",
+    "test": "wasm-pack test --headless --firefox",
+    "test:chrome": "wasm-pack test --headless --chrome",
+    "serve": "python3 -m http.server 8000",
+    "clean": "rm -rf pkg pkg-node pkg-bundler dist"
+  },
+  "devDependencies": {
+    "@wasm-tool/wasm-pack-plugin": "^1.7.0",
+    "copy-webpack-plugin": "^11.0.0",
+    "html-webpack-plugin": "^5.5.3",
+    "webpack": "^5.88.0",
+    "webpack-cli": "^5.1.4",
+    "webpack-dev-server": "^4.15.1"
+  },
+  "dependencies": {
+    "chart.js": "^4.4.0"
+  },
+  "files": [
+    "pkg/**/*",
+    "index.js",
+    "index.d.ts"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nktr-cp/multilayer-perceptron.git"
+  },
+  "keywords": [
+    "wasm",
+    "webassembly", 
+    "neural-network",
+    "machine-learning",
+    "rust"
+  ],
+  "author": "nktr-cp",
+  "license": "MIT OR Apache-2.0"
+}
