@@ -22,6 +22,9 @@ pub enum OpNode {
   Tanh {
     input: Rc<Tensor>,
   },
+  Softmax {
+    input: Rc<Tensor>,
+  },
 }
 
 impl OpNode {
@@ -40,6 +43,7 @@ impl OpNode {
       OpNode::Sigmoid { input } => Self::forward_sigmoid(&input.data, input.requires_grad),
       OpNode::ReLU { input } => Self::forward_relu(&input.data, input.requires_grad),
       OpNode::Tanh { input } => Self::forward_tanh(&input.data, input.requires_grad),
+      OpNode::Softmax { input } => Self::forward_softmax(&input.data, input.requires_grad),
     }
   }
 
@@ -54,6 +58,7 @@ impl OpNode {
       OpNode::Sigmoid { input } => Self::backward_sigmoid(grad_output, &input.data),
       OpNode::ReLU { input } => Self::backward_relu(grad_output, &input.data),
       OpNode::Tanh { input } => Self::backward_tanh(grad_output, &input.data),
+      OpNode::Softmax { input } => Self::backward_softmax(grad_output, &input.data),
     }
   }
 
@@ -158,6 +163,30 @@ impl OpNode {
     })
   }
 
+  fn forward_softmax(input: &Array2<f64>, requires_grad: bool) -> Result<Tensor> {
+    // Softmax with numerical stability: softmax(x) = exp(x - max(x)) / sum(exp(x - max(x)))
+    // Apply softmax along the last axis (row-wise for each sample)
+    let result = Array2::from_shape_fn(input.dim(), |(i, j)| {
+      let row = input.row(i);
+      let max_val = row.fold(f64::NEG_INFINITY, |acc, &x| acc.max(x));
+      let exp_sum: f64 = row.iter().map(|&x| (x - max_val).exp()).sum();
+      ((input[[i, j]] - max_val).exp()) / exp_sum
+    });
+
+    let result_dim = result.dim();
+    Ok(Tensor {
+      data: result,
+      grad: if requires_grad {
+        Some(Array2::zeros(result_dim))
+      } else {
+        None
+      },
+      requires_grad,
+      graph_id: None,
+      graph: None,
+    })
+  }
+
   fn backward_matmul(
     grad_output: &Array2<f64>,
     input_a: &Array2<f64>,
@@ -209,6 +238,39 @@ impl OpNode {
     let grad_input = grad_output * &tanh_grad;
     Ok(vec![grad_input])
   }
+
+  fn backward_softmax(grad_output: &Array2<f64>, input: &Array2<f64>) -> Result<Vec<Array2<f64>>> {
+    // Softmax backward pass is more complex due to cross-dependencies
+    // For softmax S_i = exp(x_i) / sum_j(exp(x_j)), the Jacobian is:
+    // ∂S_i/∂x_j = S_i * (δ_ij - S_j) where δ_ij is Kronecker delta
+    let mut grad_input = Array2::zeros(input.dim());
+
+    for i in 0..input.nrows() {
+      let row = input.row(i);
+      let grad_row = grad_output.row(i);
+
+      // Compute softmax for this row
+      let max_val = row.fold(f64::NEG_INFINITY, |acc, &x| acc.max(x));
+      let exp_vals: Vec<f64> = row.iter().map(|&x| (x - max_val).exp()).collect();
+      let exp_sum: f64 = exp_vals.iter().sum();
+      let softmax_vals: Vec<f64> = exp_vals.iter().map(|&exp_x| exp_x / exp_sum).collect();
+
+      // Compute gradient for this row
+      for j in 0..input.ncols() {
+        let mut grad_val = 0.0;
+        for k in 0..input.ncols() {
+          if j == k {
+            grad_val += grad_row[k] * softmax_vals[j] * (1.0 - softmax_vals[k]);
+          } else {
+            grad_val += grad_row[k] * softmax_vals[j] * (-softmax_vals[k]);
+          }
+        }
+        grad_input[[i, j]] = grad_val;
+      }
+    }
+
+    Ok(vec![grad_input])
+  }
 }
 
 pub struct OpBuilder;
@@ -232,6 +294,10 @@ impl OpBuilder {
 
   pub fn tanh(input: Rc<Tensor>) -> OpNode {
     OpNode::Tanh { input }
+  }
+
+  pub fn softmax(input: Rc<Tensor>) -> OpNode {
+    OpNode::Softmax { input }
   }
 }
 
@@ -471,5 +537,55 @@ mod tests {
     let result = input.tanh().unwrap();
     assert_abs_diff_eq!(result.data[[0, 0]], 0.0, epsilon = 1e-6);
     assert_abs_diff_eq!(result.data[[0, 1]], 1.0f64.tanh(), epsilon = 1e-6);
+
+    // Test softmax
+    let input = Tensor::new(vec![vec![1.0, 2.0, 3.0]]).unwrap();
+    let result = input.softmax().unwrap();
+
+    // Softmax([1,2,3]) should give probabilities that sum to 1
+    let sum: f64 = (0..3).map(|i| result.data[[0, i]]).sum();
+    assert_abs_diff_eq!(sum, 1.0, epsilon = 1e-6);
+
+    // Values should be in ascending order since input is [1,2,3]
+    assert!(result.data[[0, 0]] < result.data[[0, 1]]);
+    assert!(result.data[[0, 1]] < result.data[[0, 2]]);
+  }
+
+  #[test]
+  fn test_softmax_forward() {
+    let input = Tensor::new(vec![vec![1.0, 2.0, 3.0], vec![0.0, 0.0, 0.0]]).unwrap();
+
+    let op = OpBuilder::softmax(Rc::new(input));
+    let result = op.forward().unwrap();
+
+    // Check that each row sums to 1
+    for i in 0..result.data.nrows() {
+      let row_sum: f64 = (0..result.data.ncols()).map(|j| result.data[[i, j]]).sum();
+      assert_abs_diff_eq!(row_sum, 1.0, epsilon = 1e-6);
+    }
+
+    // For uniform input [0,0,0], softmax should give [1/3, 1/3, 1/3]
+    for j in 0..3 {
+      assert_abs_diff_eq!(result.data[[1, j]], 1.0 / 3.0, epsilon = 1e-6);
+    }
+  }
+
+  #[test]
+  fn test_softmax_backward() {
+    let input = Tensor::new(vec![vec![1.0, 2.0, 3.0]]).unwrap();
+
+    let op = OpBuilder::softmax(Rc::new(input.clone()));
+    let grad_output = Array2::from_shape_vec((1, 3), vec![1.0, 0.0, 0.0]).unwrap();
+
+    let gradients = op.backward(&grad_output).unwrap();
+
+    assert_eq!(gradients.len(), 1);
+
+    // The gradient should have the correct shape
+    assert_eq!(gradients[0].dim(), input.data.dim());
+
+    // For softmax, gradients should sum to 0 along each row (due to constraint that softmax sums to 1)
+    let grad_sum: f64 = (0..3).map(|j| gradients[0][[0, j]]).sum();
+    assert_abs_diff_eq!(grad_sum, 0.0, epsilon = 1e-6);
   }
 }

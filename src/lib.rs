@@ -14,15 +14,25 @@
 //!
 //! ```rust
 //! use multilayer_perceptron::prelude::*;
+//! use std::cell::RefCell;
+//! use std::rc::Rc;
 //!
 //! // Create a tensor
 //! let tensor = Tensor::ones(2, 3);
 //! println!("Tensor shape: {:?}", tensor.shape());
 //!
-//! // Create a simple neural network (when implemented)
-//! // let mut model = Sequential::new();
-//! // model.add(Dense::new(784, 128, Activation::ReLU));
-//! // model.add(Dense::new(128, 10, Activation::Softmax));
+//! // Create a neural network with PyTorch-like API
+//! let graph = Rc::new(RefCell::new(ComputationGraph::new()));
+//! let mut model = Sequential::new()
+//!     .relu_layer(784, 128)
+//!     .relu_layer(128, 64)
+//!     .softmax_layer(64, 10)
+//!     .with_graph(graph);
+//!
+//! // Forward pass
+//! let input = Tensor::random(1, 784);
+//! let output = model.forward(input).unwrap();
+//! println!("Output shape: {:?}", output.shape());
 //! ```
 
 #![warn(clippy::all)]
@@ -30,9 +40,9 @@
 // Module declarations will be added as we implement them
 pub mod error;
 pub mod graph;
+pub mod layers;
 pub mod ops;
 pub mod tensor;
-// pub mod layers;
 // pub mod dataset;
 // pub mod train;
 
@@ -43,6 +53,9 @@ pub mod tensor;
 pub mod prelude {
   pub use crate::error::{Result, TensorError};
   pub use crate::graph::{ComputationGraph, EdgeId, GraphEdge, GraphNode, NodeId};
+  pub use crate::layers::{
+    Activation, DenseLayer, Layer, LayerInfo, ModelSummary, Sequential, WeightInit,
+  };
   pub use crate::ops::{OpBuilder, OpNode};
   pub use crate::tensor::Tensor;
 }
