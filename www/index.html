@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Multilayer Perceptron WebAssembly Demo</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🧠 Multilayer Perceptron WebAssembly Demo</h1>
+            <p>Interactive neural network training in your browser using Rust + WebAssembly</p>
+        </header>
+
+        <div class="demo-section">
+            <h2>🎯 Binary Classification Demo</h2>
+            
+            <div class="controls">
+                <div class="control-group">
+                    <label for="learning-rate">Learning Rate:</label>
+                    <input type="number" id="learning-rate" value="0.01" min="0.001" max="1" step="0.001">
+                </div>
+                
+                <div class="control-group">
+                    <label for="epochs">Epochs:</label>
+                    <input type="number" id="epochs" value="100" min="1" max="1000" step="1">
+                </div>
+                
+                <div class="control-group">
+                    <label for="hidden-size">Hidden Layer Size:</label>
+                    <input type="number" id="hidden-size" value="64" min="1" max="256" step="1">
+                </div>
+                
+                <button id="start-training" class="btn-primary">Start Training</button>
+                <button id="stop-training" class="btn-secondary" disabled>Stop Training</button>
+                <button id="generate-data" class="btn-tertiary">Generate New Data</button>
+            </div>
+
+            <div class="data-section">
+                <h3>📊 Dataset</h3>
+                <div class="data-info">
+                    <span id="data-info">Click "Generate New Data" to create a synthetic dataset</span>
+                </div>
+                <canvas id="data-plot" width="400" height="300"></canvas>
+            </div>
+
+            <div class="model-section">
+                <h3>🏗️ Model Architecture</h3>
+                <div id="model-summary">
+                    <p>Model not created yet. Click "Start Training" to build the model.</p>
+                </div>
+            </div>
+
+            <div class="training-section">
+                <h3>📈 Training Progress</h3>
+                <div class="progress-info">
+                    <div class="metric">
+                        <label>Epoch:</label>
+                        <span id="current-epoch">0</span> / <span id="total-epochs">0</span>
+                    </div>
+                    <div class="metric">
+                        <label>Loss:</label>
+                        <span id="current-loss">0.000</span>
+                    </div>
+                    <div class="metric">
+                        <label>Accuracy:</label>
+                        <span id="current-accuracy">0.0%</span>
+                    </div>
+                </div>
+                <div class="progress-bar">
+                    <div id="progress-fill"></div>
+                </div>
+                <canvas id="loss-chart" width="600" height="300"></canvas>
+            </div>
+
+            <div class="prediction-section">
+                <h3>🔮 Predictions</h3>
+                <div class="prediction-controls">
+                    <div class="control-group">
+                        <label for="input-x">X:</label>
+                        <input type="number" id="input-x" value="0.5" min="-2" max="2" step="0.1">
+                    </div>
+                    <div class="control-group">
+                        <label for="input-y">Y:</label>
+                        <input type="number" id="input-y" value="0.5" min="-2" max="2" step="0.1">
+                    </div>
+                    <button id="predict" class="btn-primary">Predict</button>
+                </div>
+                <div id="prediction-result">
+                    <p>Enter values and click "Predict" to see the model's prediction</p>
+                </div>
+                <canvas id="decision-boundary" width="400" height="300"></canvas>
+            </div>
+        </div>
+
+        <div class="log-section">
+            <h3>📝 Training Log</h3>
+            <div id="log-output"></div>
+        </div>
+    </div>
+
+    <script src="index.js"></script>
+</body>
+</html>
