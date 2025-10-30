@@ -30,8 +30,6 @@ impl DataValue {
     }
   }
 
-
-
   pub fn is_null(&self) -> bool {
     matches!(self, DataValue::Null)
   }

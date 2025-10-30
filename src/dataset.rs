@@ -184,7 +184,7 @@ impl Dataset {
         .parse()
         .map_err(|e| TensorError::InvalidValue(format!("Invalid ID: {}", e)))?;
 
-            // Parse diagnosis
+      // Parse diagnosis
       let diagnosis = Diagnosis::parse(&record[1])?;
 
       let mut features = Array1::zeros(30);
