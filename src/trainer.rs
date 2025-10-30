@@ -551,7 +551,9 @@ impl<'a> Trainer<'a> {
   /// Convert flat vector back to tensor
   fn vec_to_tensor(&self, vec: Vec<f64>) -> Result<Tensor> {
     if vec.is_empty() {
-      return Err(TensorError::ComputationError { message: "Cannot convert empty vector to tensor".to_string() });
+      return Err(TensorError::ComputationError {
+        message: "Cannot convert empty vector to tensor".to_string(),
+      });
     }
 
     // Reshape as column vector
