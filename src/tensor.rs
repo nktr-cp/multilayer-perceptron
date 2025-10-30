@@ -223,6 +223,19 @@ impl Tensor {
     })
   }
 
+  /// Sync gradient from computation graph to this tensor
+  pub fn sync_gradient_from_graph(&mut self) -> Result<()> {
+    with_graph!(self, |graph, node_id| {
+      // List all nodes with gradients for debugging
+      if let Some(grad) = graph.borrow().get_node_gradient(node_id) {
+        self.grad = Some(grad);
+      }
+      Ok(())
+    });
+
+    Ok(())
+  }
+
   /// Check if two tensors belong to the same computation graph
   pub fn same_graph(a: &Tensor, b: &Tensor) -> bool {
     match (&a.graph, &b.graph) {
@@ -312,6 +325,182 @@ impl Tensor {
     let op = OpBuilder::matmul(Rc::new(self.clone()), Rc::new(other.clone()));
     let result = op.forward()?;
     self.add_to_graph(other, op, result)
+  }
+
+  /// Create tensor from existing Array2 data
+  pub fn from_data(data: Array2<f64>) -> Result<Tensor> {
+    Ok(Self {
+      data,
+      grad: None,
+      requires_grad: false,
+      graph_id: None,
+      graph: None,
+    })
+  }
+
+  /// Get gradient (same as grad() for compatibility)
+  pub fn gradient(&self) -> Option<Tensor> {
+    self.grad.as_ref().map(|grad_data| Tensor {
+      data: grad_data.clone(),
+      grad: None,
+      requires_grad: false,
+      graph_id: None,
+      graph: None,
+    })
+  }
+
+  /// Set gradient from tensor
+  pub fn set_gradient(&mut self, gradient: Option<Tensor>) {
+    if let Some(grad_tensor) = gradient {
+      self.grad = Some(grad_tensor.data);
+    } else {
+      self.grad = None;
+    }
+  }
+
+  /// Element-wise natural logarithm
+  pub fn log(&self) -> Result<Tensor> {
+    let mut result_data = self.data.clone();
+    for elem in result_data.iter_mut() {
+      if *elem <= 0.0 {
+        return Err(TensorError::ComputationError {
+          message: "Cannot compute log of non-positive number".to_string(),
+        });
+      }
+      *elem = elem.ln();
+    }
+    Ok(Tensor {
+      data: result_data,
+      grad: None,
+      requires_grad: false,
+      graph_id: None,
+      graph: None,
+    })
+  }
+
+  /// Element-wise negation
+  pub fn neg(&self) -> Result<Tensor> {
+    Ok(Tensor {
+      data: -&self.data,
+      grad: None,
+      requires_grad: false,
+      graph_id: None,
+      graph: None,
+    })
+  }
+
+  /// Element-wise multiplication
+  pub fn mul(&self, other: &Tensor) -> Result<Tensor> {
+    if self.shape() != other.shape() {
+      return Err(TensorError::ShapeMismatch {
+        operation: "mul".to_string(),
+        expected: self.shape(),
+        got: other.shape(),
+      });
+    }
+
+    Ok(Tensor {
+      data: &self.data * &other.data,
+      grad: None,
+      requires_grad: false,
+      graph_id: None,
+      graph: None,
+    })
+  }
+
+  /// Element-wise division
+  pub fn div(&self, other: &Tensor) -> Result<Tensor> {
+    if self.shape() != other.shape() {
+      return Err(TensorError::ShapeMismatch {
+        operation: "div".to_string(),
+        expected: self.shape(),
+        got: other.shape(),
+      });
+    }
+
+    // Check for division by zero
+    for elem in other.data.iter() {
+      if elem.abs() < f64::EPSILON {
+        return Err(TensorError::ComputationError {
+          message: "Division by zero".to_string(),
+        });
+      }
+    }
+
+    Ok(Tensor {
+      data: &self.data / &other.data,
+      grad: None,
+      requires_grad: false,
+      graph_id: None,
+      graph: None,
+    })
+  }
+
+  /// Element-wise subtraction
+  pub fn sub(&self, other: &Tensor) -> Result<Tensor> {
+    if self.shape() != other.shape() {
+      return Err(TensorError::ShapeMismatch {
+        operation: "sub".to_string(),
+        expected: self.shape(),
+        got: other.shape(),
+      });
+    }
+
+    Ok(Tensor {
+      data: &self.data - &other.data,
+      grad: None,
+      requires_grad: false,
+      graph_id: None,
+      graph: None,
+    })
+  }
+
+  /// Scalar multiplication
+  pub fn mul_scalar(&self, scalar: f64) -> Result<Tensor> {
+    Ok(Tensor {
+      data: &self.data * scalar,
+      grad: None,
+      requires_grad: false,
+      graph_id: None,
+      graph: None,
+    })
+  }
+
+  /// Add scalar to all elements
+  pub fn add_scalar(&self, scalar: f64) -> Result<Tensor> {
+    Ok(Tensor {
+      data: &self.data + scalar,
+      grad: None,
+      requires_grad: false,
+      graph_id: None,
+      graph: None,
+    })
+  }
+
+  /// Compute mean of all elements
+  pub fn mean(&self) -> Result<Tensor> {
+    let sum: f64 = self.data.iter().sum();
+    let count = self.data.len() as f64;
+    let mean_val = sum / count;
+
+    let result = Tensor {
+      data: Array2::from_elem((1, 1), mean_val),
+      grad: None,
+      requires_grad: self.requires_grad,
+      graph_id: None,
+      graph: None,
+    };
+
+    // If this tensor is tracked in a computation graph, create a proper mean operation
+    if let (Some(graph_weak), Some(_)) = (&self.graph, self.graph_id) {
+      if let Some(_graph) = graph_weak.upgrade() {
+        let op = OpBuilder::mean(Rc::new(self.clone()));
+        let result_from_op = op.forward()?;
+        return self.add_unary_to_graph(op, result_from_op);
+      }
+    }
+
+    Ok(result)
   }
 
   pub fn add(&self, other: &Tensor) -> Result<Tensor> {
