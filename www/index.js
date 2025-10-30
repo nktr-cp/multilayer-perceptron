@@ -202,6 +202,15 @@ class MLPDemo {
     }
 
     resetCharts() {
+        if (!this.charts.loss || !this.charts.accuracy) {
+            this.initializeCharts();
+        }
+
+        if (!this.charts.loss || !this.charts.accuracy) {
+            this.log('Charts are not initialized yet. Skipping reset.', 'warning');
+            return;
+        }
+
         this.trainingHistory = [];
         this.validationHistory = [];
         this.bestAccuracy = 0;
