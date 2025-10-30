@@ -59,6 +59,8 @@ opt-level = "s"
 lto = true
 codegen-units = 1
 panic = "abort"
+# Additional optimizations for WebAssembly
+strip = true
 
 # Benchmark configuration - disabled for now due to dependency issues
 # [[bench]]
