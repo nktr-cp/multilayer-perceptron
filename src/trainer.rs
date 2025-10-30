@@ -393,12 +393,16 @@ impl<'a> Trainer<'a> {
     train_y: &Tensor,
     indices: &[usize],
   ) -> Result<(f64, HashMap<String, f64>)> {
+    if indices.is_empty() {
+      // Return zero loss and empty metrics if no indices are provided
+      return Ok((0.0, HashMap::new()));
+    }
     let mut total_loss = 0.0;
     let mut total_predictions = Vec::with_capacity(indices.len());
     let mut total_targets = Vec::with_capacity(indices.len());
     let use_full_batch = self.optimizer.requires_full_batch();
     let effective_batch_size = if use_full_batch {
-      std::cmp::max(indices.len(), 1)
+      indices.len()
     } else {
       std::cmp::max(self.config.batch_size, 1)
     };
