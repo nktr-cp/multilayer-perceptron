@@ -15,17 +15,22 @@ Cargo.lock
 
 # WASM build artifacts
 pkg/
+pkg-node/
+pkg-bundler/
 wasm-pack.log
 
-# Node.js dependencies (for web interface)
+# Node.js dependencies
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+package-lock.json
 
 # Web build artifacts
 web/pkg/
 web/dist/
+dist/
+www/pkg/
 
 # IDE files
 .vscode/
@@ -42,8 +47,8 @@ Thumbs.db
 *.temp
 
 # Dataset files (might be large)
-*.csv
-data/
+# *.csv
+# data/
 
 # Training outputs
 checkpoints/
