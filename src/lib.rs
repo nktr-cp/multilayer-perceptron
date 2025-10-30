@@ -50,6 +50,10 @@ pub mod optimizer;
 pub mod tensor;
 pub mod trainer;
 
+// WebAssembly bindings (only included when targeting wasm32)
+#[cfg(target_arch = "wasm32")]
+pub mod wasm;
+
 /// Prelude module for convenient imports
 ///
 /// This module re-exports the most commonly used types and functions
