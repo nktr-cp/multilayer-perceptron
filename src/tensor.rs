@@ -313,6 +313,12 @@ impl Tensor {
     let result = op.forward()?;
     self.add_unary_to_graph(op, result)
   }
+
+  pub fn softmax(&self) -> Result<Tensor> {
+    let op = OpBuilder::softmax(Rc::new(self.clone()));
+    let result = op.forward()?;
+    self.add_unary_to_graph(op, result)
+  }
 }
 
 impl fmt::Debug for Tensor {
