@@ -298,11 +298,7 @@ impl JsModel {
 
   /// Add a dense layer with sigmoid activation
   #[wasm_bindgen]
-  pub fn add_dense_sigmoid(
-    &mut self,
-    input_size: usize,
-    output_size: usize,
-  ) -> JsResult<()> {
+  pub fn add_dense_sigmoid(&mut self, input_size: usize, output_size: usize) -> JsResult<()> {
     self.inner = self
       .inner
       .clone()
@@ -313,11 +309,7 @@ impl JsModel {
 
   /// Add a dense layer with softmax activation (typically for output layer)
   #[wasm_bindgen]
-  pub fn add_dense_softmax(
-    &mut self,
-    input_size: usize,
-    output_size: usize,
-  ) -> JsResult<()> {
+  pub fn add_dense_softmax(&mut self, input_size: usize, output_size: usize) -> JsResult<()> {
     self.inner = self
       .inner
       .clone()
@@ -865,11 +857,7 @@ impl DataConverter {
 
   /// Create tensor from CSV-like string data
   #[wasm_bindgen]
-  pub fn csv_to_tensor(
-    csv_string: &str,
-    has_header: bool,
-    delimiter: &str,
-  ) -> JsResult<JsTensor> {
+  pub fn csv_to_tensor(csv_string: &str, has_header: bool, delimiter: &str) -> JsResult<JsTensor> {
     let lines: Vec<&str> = csv_string.lines().collect();
 
     if lines.is_empty() {
