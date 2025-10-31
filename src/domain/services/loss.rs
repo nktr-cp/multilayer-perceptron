@@ -1012,30 +1012,6 @@ impl<L: Loss> RegularizedLoss<L> {
 
     Ok(Tensor::zeros(1, 1))
   }
-
-  /// Alias for `compute_loss` for backward compatibility
-  ///
-  /// **Deprecated:** Use `compute_loss` instead
-  pub fn forward_with_model<M: RegularizableModel>(
-    &self,
-    predictions: &Tensor,
-    targets: &Tensor,
-    model: &M,
-  ) -> Result<Tensor> {
-    self.compute_loss(predictions, targets, model)
-  }
-
-  /// Alias for `compute_gradients` for backward compatibility
-  ///
-  /// **Deprecated:** Use `compute_gradients` instead
-  pub fn backward_with_model<M: RegularizableModel>(
-    &self,
-    predictions: &Tensor,
-    targets: &Tensor,
-    model: &mut M,
-  ) -> Result<Tensor> {
-    self.compute_gradients(predictions, targets, model)
-  }
 }
 
 #[cfg(test)]
