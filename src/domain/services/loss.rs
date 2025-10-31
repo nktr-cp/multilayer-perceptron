@@ -996,10 +996,7 @@ impl<L: Loss> RegularizedLoss<L> {
   ///
   /// # Returns
   /// Empty tensor (regularization doesn't contribute to prediction gradients)
-  pub fn compute_gradients<M: RegularizableModel>(
-    &self,
-    model: &mut M,
-  ) -> Result<Tensor> {
+  pub fn compute_gradients<M: RegularizableModel>(&self, model: &mut M) -> Result<Tensor> {
     if !self.config.is_enabled() {
       return Ok(Tensor::zeros(1, 1));
     }
