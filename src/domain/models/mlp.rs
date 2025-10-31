@@ -286,20 +286,33 @@ impl RegularizableModel for Sequential {
     for layer in &mut self.layers {
       if let Some(dense_layer) = layer.as_any_mut().downcast_mut::<DenseLayer>() {
         if weight_idx < weight_grads.len() && bias_idx < bias_grads.len() {
-          // Add regularization gradients to existing gradients
-          if let Some(existing_weight_grad) = dense_layer.weights_mut().grad.as_mut() {
-            // Add element-wise using ndarray operations
-            *existing_weight_grad = existing_weight_grad.clone() + &weight_grads[weight_idx].data;
-          } else {
-            dense_layer.weights_mut().grad = Some(weight_grads[weight_idx].data.clone());
-          }
+          let accumulate = |param: &mut Tensor, grad: &Tensor| {
+            // Update the parameter's local gradient storage
+            if let Some(existing_grad) = param.grad.as_mut() {
+              *existing_grad = existing_grad.clone() + &grad.data;
+            } else {
+              param.grad = Some(grad.data.clone());
+            }
 
-          if let Some(existing_bias_grad) = dense_layer.bias_mut().grad.as_mut() {
-            // Add element-wise using ndarray operations
-            *existing_bias_grad = existing_bias_grad.clone() + &bias_grads[bias_idx].data;
-          } else {
-            dense_layer.bias_mut().grad = Some(bias_grads[bias_idx].data.clone());
-          }
+            // Also update the gradient stored in the computation graph node so that
+            // optimizers reading from the graph see the regularization contribution.
+            if let (Some(graph_weak), Some(node_id)) = (&param.graph, param.graph_id) {
+              if let Some(graph_rc) = graph_weak.upgrade() {
+                let node_rc_opt = { graph_rc.borrow().get_node(node_id) };
+                if let Some(node_rc) = node_rc_opt {
+                  let mut node_ref = node_rc.borrow_mut();
+                  if let Some(existing_graph_grad) = node_ref.tensor.grad.as_mut() {
+                    *existing_graph_grad = existing_graph_grad.clone() + &grad.data;
+                  } else {
+                    node_ref.tensor.grad = Some(grad.data.clone());
+                  }
+                }
+              }
+            }
+          };
+
+          accumulate(dense_layer.weights_mut(), &weight_grads[weight_idx]);
+          accumulate(dense_layer.bias_mut(), &bias_grads[bias_idx]);
 
           weight_idx += 1;
           bias_idx += 1;
