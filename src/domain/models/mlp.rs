@@ -73,9 +73,24 @@ impl Sequential {
     self.add(DenseLayer::sigmoid(input_size, output_size))
   }
 
+  /// Add a dense layer with tanh activation
+  pub fn tanh_layer(self, input_size: usize, output_size: usize) -> Self {
+    self.add(DenseLayer::tanh(input_size, output_size))
+  }
+
   /// Add a dense layer with softmax activation (typically for output layer)
   pub fn softmax_layer(self, input_size: usize, output_size: usize) -> Self {
     self.add(DenseLayer::softmax(input_size, output_size))
+  }
+
+  /// Add a dense layer with no activation (linear layer)
+  pub fn linear_layer(self, input_size: usize, output_size: usize) -> Self {
+    self.add(DenseLayer::new(
+      input_size,
+      output_size,
+      Activation::None,
+      WeightInit::XavierUniform,
+    ))
   }
 
   pub fn set_output_activation(&mut self, activation: Activation) {
