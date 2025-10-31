@@ -48,6 +48,7 @@ pub trait Layer: Debug {
   fn name(&self) -> &'static str;
   fn clone_layer(&self) -> Box<dyn Layer>;
   fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+  fn as_any(&self) -> &dyn std::any::Any;
 
   /// Get mutable references to parameters (for optimizer)
   fn parameters_mut(&mut self) -> Vec<&mut Tensor> {
@@ -212,6 +213,26 @@ impl DenseLayer {
     self.weights = self.weights.clone().with_graph(graph.clone());
     self.bias = self.bias.clone().with_graph(graph.clone());
   }
+
+  /// Get reference to weights tensor
+  pub fn weights(&self) -> &Tensor {
+    &self.weights
+  }
+
+  /// Get reference to bias tensor
+  pub fn bias(&self) -> &Tensor {
+    &self.bias
+  }
+
+  /// Get mutable reference to weights tensor
+  pub fn weights_mut(&mut self) -> &mut Tensor {
+    &mut self.weights
+  }
+
+  /// Get mutable reference to bias tensor
+  pub fn bias_mut(&mut self) -> &mut Tensor {
+    &mut self.bias
+  }
 }
 
 impl Layer for DenseLayer {
@@ -243,6 +264,10 @@ impl Layer for DenseLayer {
   }
 
   fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+    self
+  }
+
+  fn as_any(&self) -> &dyn std::any::Any {
     self
   }
 
