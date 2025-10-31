@@ -68,7 +68,8 @@ fn demo_binary_classification() -> Result<()> {
     early_stopping_patience: 10,
     early_stopping_min_delta: 0.001,
     enable_early_stopping: true,
-    learning_rate: 0.001,
+    learning_rate: 0.01,
+    regularization: None,
   };
   let loss_fn = BinaryCrossEntropy::new();
   let optimizer = SGD::new(config.learning_rate);
@@ -216,6 +217,7 @@ fn demo_regression() -> Result<()> {
     early_stopping_min_delta: 0.05,
     enable_early_stopping: true,
     learning_rate: 0.0005,
+    regularization: Some(RegularizationConfig::l2_only(0.02)),
   };
 
   let loss_fn = MeanSquaredError::new(); // MSE for regression
@@ -337,6 +339,7 @@ fn demo_multiclass() -> Result<()> {
     early_stopping_min_delta: 0.001,
     enable_early_stopping: true,
     learning_rate: 0.01,
+    regularization: None,
   };
 
   let loss_fn = CrossEntropy::new(); // Cross-entropy for multi-class

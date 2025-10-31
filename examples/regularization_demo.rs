@@ -2,7 +2,7 @@
 //!
 //! Shows how adding regularization only requires changing 3 lines of code.
 
-use multilayer_perceptron::domain::services::loss::{RegularizationConfig, RegularizedLoss};
+use multilayer_perceptron::domain::services::loss::RegularizationConfig;
 use multilayer_perceptron::prelude::*;
 use multilayer_perceptron::usecase::preprocess::build_pipeline;
 use std::cell::RefCell;
@@ -88,6 +88,7 @@ fn train_without_regularization(
     early_stopping_min_delta: 0.05,
     enable_early_stopping: true,
     learning_rate: 0.0005,
+    regularization: None,
   };
 
   let loss_fn = MeanSquaredError::new(); // MSE for regression
@@ -153,16 +154,14 @@ fn train_with_regularization(
     early_stopping_min_delta: 0.05,
     enable_early_stopping: true,
     learning_rate: 0.0005,
+    regularization: Some(reg_config),
   };
 
-  let base_loss = MeanSquaredError::new();
-  let loss_fn = RegularizedLoss::new(base_loss, reg_config);
-
+  let loss_fn = MeanSquaredError::new();
   let optimizer = SGD::new(config.learning_rate);
   let mut trainer = Trainer::new(&mut model, loss_fn, optimizer).with_config(config);
   let _history = trainer.fit(&train_x, &train_y, Some(&val_x), Some(&val_y))?;
 
-  // Final evaluation
   model.eval();
   let final_predictions_scaled = model.forward(val_x.clone())?;
   let mut final_predictions = final_predictions_scaled.clone();
