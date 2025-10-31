@@ -64,6 +64,13 @@ jobs:
           cargo build --target wasm32-unknown-unknown --lib --release
           wasm-bindgen --target web --out-dir pkg --typescript target/wasm32-unknown-unknown/release/multilayer_perceptron.wasm
 
+      - name: Copy WASM files to frontend
+        run: |
+          # Create wasm directory in frontend/public
+          mkdir -p frontend/public/wasm
+          # Copy WASM files to frontend public directory
+          cp pkg/multilayer_perceptron.js pkg/multilayer_perceptron_bg.wasm pkg/multilayer_perceptron.d.ts frontend/public/wasm/
+
       - name: Install Node dependencies (Frontend)
         run: |
           cd frontend

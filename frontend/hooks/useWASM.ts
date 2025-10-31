@@ -7,13 +7,13 @@ import { useEffect, useState } from "react"
  * Returns the module once ready or null while loading.
  */
 export function useWASM() {
-  const [wasmModule, setWasmModule] = useState<typeof import("multilayer-perceptron") | null>(null)
+  const [wasmModule, setWasmModule] = useState<any | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let isMounted = true
 
-    import("multilayer-perceptron")
+    import("../public/wasm/multilayer_perceptron.js")
       .then(async (module) => {
         // Initialize the WASM module
         await module.default()

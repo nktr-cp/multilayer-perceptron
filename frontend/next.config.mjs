@@ -13,6 +13,11 @@ const nextConfig = {
   trailingSlash: true,
   basePath: process.env.NODE_ENV === 'production' ? '/multilayer-perceptron' : '',
   assetPrefix: process.env.NODE_ENV === 'production' ? '/multilayer-perceptron/' : '',
+  turbopack: {
+    resolveAlias: {
+      'multilayer-perceptron': '../pkg',
+    },
+  },
 }
 
 export default nextConfig
