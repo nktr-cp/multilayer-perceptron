@@ -178,6 +178,136 @@ impl Loss for BinaryCrossEntropy {
   }
 }
 
+/// Cross Entropy Loss
+///
+/// Cross Entropy loss is used for multi-class classification tasks.
+/// The loss is computed as:
+///
+/// CE(y, ŷ) = -(1/N) * Σ Σ y_i * log(ŷ_i)
+///
+/// Where:
+/// - y is the true one-hot encoded labels
+/// - ŷ is the predicted probabilities (softmax output)
+/// - N is the number of samples
+///
+/// The gradient with respect to predictions is:
+/// ∂CE/∂ŷ = -(y - ŷ) / N
+#[derive(Debug, Clone)]
+pub struct CrossEntropy {
+  /// Small epsilon value to prevent log(0)
+  epsilon: f64,
+}
+
+impl CrossEntropy {
+  /// Create a new Cross Entropy loss
+  ///
+  /// # Examples
+  /// ```
+  /// use multilayer_perceptron::prelude::*;
+  ///
+  /// let loss_fn = CrossEntropy::new();
+  /// ```
+  pub fn new() -> Self {
+    Self { epsilon: 1e-8 }
+  }
+
+  /// Create a new Cross Entropy loss with custom epsilon
+  ///
+  /// # Arguments
+  /// * `epsilon` - Small value to add for numerical stability
+  ///
+  /// # Examples
+  /// ```
+  /// use multilayer_perceptron::prelude::*;
+  ///
+  /// let loss_fn = CrossEntropy::with_epsilon(1e-10);
+  /// ```
+  pub fn with_epsilon(epsilon: f64) -> Self {
+    assert!(epsilon > 0.0, "Epsilon must be positive");
+    Self { epsilon }
+  }
+
+  /// Get the epsilon value used for numerical stability
+  pub fn epsilon(&self) -> f64 {
+    self.epsilon
+  }
+
+  /// Clamp predictions to prevent log(0)
+  fn clamp_predictions(&self, predictions: &Tensor) -> Result<Tensor> {
+    let min_val = self.epsilon;
+    let max_val = 1.0 - self.epsilon;
+
+    let mut clamped_data = predictions.data.clone();
+    for i in 0..clamped_data.nrows() {
+      for j in 0..clamped_data.ncols() {
+        let val = clamped_data[[i, j]];
+        if val < min_val {
+          clamped_data[[i, j]] = min_val;
+        } else if val > max_val {
+          clamped_data[[i, j]] = max_val;
+        }
+      }
+    }
+
+    Ok(Tensor {
+      data: clamped_data,
+      grad: None,
+      requires_grad: predictions.requires_grad,
+      graph_id: None,
+      graph: predictions.graph.clone(),
+    })
+  }
+}
+
+impl Default for CrossEntropy {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
+impl Loss for CrossEntropy {
+  fn forward(&self, predictions: &Tensor, targets: &Tensor) -> Result<Tensor> {
+    assert_eq!(
+      predictions.shape(),
+      targets.shape(),
+      "Predictions and targets must have the same shape"
+    );
+
+    // Clamp predictions to prevent log(0)
+    let clamped_preds = self.clamp_predictions(predictions)?;
+
+    // Compute log(predictions)
+    let log_preds = clamped_preds.log()?;
+
+    // Compute targets * log(predictions)
+    let cross_entropy = targets.mul(&log_preds)?;
+
+    // Take negative mean: -(1/N) * sum(targets * log(predictions))
+    let mean_cross_entropy = cross_entropy.mean()?;
+    mean_cross_entropy.mul_scalar(-1.0)
+  }
+
+  fn backward(&self, predictions: &Tensor, targets: &Tensor) -> Result<Tensor> {
+    assert_eq!(
+      predictions.shape(),
+      targets.shape(),
+      "Predictions and targets must have the same shape"
+    );
+
+    // Clamp predictions to prevent division by 0
+    let clamped_preds = self.clamp_predictions(predictions)?;
+
+    // Gradient: -(targets/predictions) / batch_size
+    let gradient = targets.div(&clamped_preds)?;
+    let batch_size = predictions.shape().0 as f64;
+    gradient.mul_scalar(-1.0 / batch_size)
+  }
+
+  fn name(&self) -> &'static str {
+    "CrossEntropy"
+  }
+}
+
 /// Mean Squared Error Loss
 ///
 /// MSE loss is computed as:

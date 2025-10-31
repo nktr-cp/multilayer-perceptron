@@ -52,7 +52,9 @@ pub use crate::adapters::presentation::wasm;
 /// This module re-exports the most commonly used types and functions
 /// for convenient access when using the multilayer perceptron library.
 pub mod prelude {
-  pub use crate::adapters::data::{csv_repo::CsvDataRepository, generic_repo::*};
+  pub use crate::adapters::data::{
+    BostonHousingRepository, BreastCancerRepository, IrisRepository,
+  };
   pub use crate::core::{
     ComputationGraph, EdgeId, GraphEdge, GraphNode, NodeId, OpBuilder, OpNode, Result, Tensor,
     TensorError,
@@ -60,7 +62,9 @@ pub mod prelude {
   pub use crate::domain::models::{
     Activation, DenseLayer, Layer, LayerInfo, ModelSummary, Sequential, WeightInit, MLP,
   };
-  pub use crate::domain::services::loss::{BinaryCrossEntropy, Loss, MeanSquaredError};
+  pub use crate::domain::services::loss::{
+    BinaryCrossEntropy, CrossEntropy, Loss, MeanSquaredError,
+  };
   pub use crate::domain::services::metrics::{
     Accuracy, BinaryClassificationMetrics, CategoricalAccuracy, F1Score, MeanSquaredErrorMetric,
     Metric, Precision, Recall,

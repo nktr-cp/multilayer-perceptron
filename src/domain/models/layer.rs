@@ -130,6 +130,15 @@ impl DenseLayer {
     )
   }
 
+  pub fn tanh(input_size: usize, output_size: usize) -> Self {
+    Self::new(
+      input_size,
+      output_size,
+      Activation::Tanh,
+      WeightInit::XavierUniform,
+    )
+  }
+
   pub fn softmax(input_size: usize, output_size: usize) -> Self {
     Self::new(
       input_size,
