@@ -992,16 +992,12 @@ impl<L: Loss> RegularizedLoss<L> {
   /// the regularization gradients on top of the existing gradients.
   ///
   /// # Arguments
-  /// * `predictions` - Model predictions (unused, kept for API consistency)
-  /// * `targets` - Target values (unused, kept for API consistency)
   /// * `model` - Mutable model to add regularization gradients to
   ///
   /// # Returns
   /// Empty tensor (regularization doesn't contribute to prediction gradients)
   pub fn compute_gradients<M: RegularizableModel>(
     &self,
-    _predictions: &Tensor,
-    _targets: &Tensor,
     model: &mut M,
   ) -> Result<Tensor> {
     if !self.config.is_enabled() {
