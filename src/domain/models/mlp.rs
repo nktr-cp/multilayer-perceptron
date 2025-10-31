@@ -162,6 +162,9 @@ impl Sequential {
 
   pub fn zero_grad(&mut self) {
     self.zero_gradients();
+    if let Some(graph) = &self.graph {
+      graph.borrow_mut().zero_grad();
+    }
   }
 
   pub fn parameters_mut(&mut self) -> Vec<&mut Tensor> {
