@@ -70,7 +70,9 @@ pub mod prelude {
     Accuracy, BinaryClassificationMetrics, CategoricalAccuracy, F1Score, MeanSquaredErrorMetric,
     Metric, Precision, Recall,
   };
-  pub use crate::domain::services::optimizer::{GradientDescent, Optimizer, SGDMomentum, SGD};
+  pub use crate::domain::services::optimizer::{
+    Adam, GradientDescent, Optimizer, RMSProp, SGDMomentum, SGD,
+  };
   pub use crate::domain::types::{
     DataConfig, DataLoader, Dataset, FeatureStats, PreprocessConfig, TaskKind,
   };
