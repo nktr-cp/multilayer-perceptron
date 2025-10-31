@@ -3,8 +3,7 @@
 //! This module provides various metrics to evaluate the performance of
 //! trained models, particularly for binary classification tasks.
 
-use crate::error::Result;
-use crate::tensor::Tensor;
+use crate::core::{Result, Tensor};
 
 /// Binary classification metrics
 ///

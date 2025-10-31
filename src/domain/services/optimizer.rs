@@ -3,8 +3,7 @@
 //! This module provides different optimizers for updating model parameters
 //! during training. Currently supports SGD (Stochastic Gradient Descent).
 
-use crate::error::Result;
-use crate::tensor::Tensor;
+use crate::core::{Result, Tensor};
 use ndarray::Zip;
 use std::collections::HashMap;
 
@@ -63,7 +62,7 @@ impl SGD {
   ///
   /// # Examples
   /// ```
-  /// use multilayer_perceptron::optimizer::{SGD, Optimizer};
+/// use multilayer_perceptron::prelude::*;
   ///
   /// let optimizer = SGD::new(0.01);
   /// assert_eq!(optimizer.learning_rate(), 0.01);
@@ -140,7 +139,7 @@ impl SGDMomentum {
   ///
   /// # Examples
   /// ```
-  /// use multilayer_perceptron::optimizer::{SGDMomentum, Optimizer};
+/// use multilayer_perceptron::prelude::*;
   ///
   /// let optimizer = SGDMomentum::new(0.01, 0.9);
   /// assert_eq!(optimizer.learning_rate(), 0.01);
@@ -286,7 +285,7 @@ impl Optimizer for GradientDescent {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::tensor::Tensor;
+  use crate::core::Tensor;
   use approx::assert_abs_diff_eq;
 
   #[test]

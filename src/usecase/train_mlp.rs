@@ -4,13 +4,15 @@
 //! including the Trainer struct that orchestrates the training loop with
 //! forward propagation, backward propagation, and parameter optimization.
 
-use crate::error::{Result, TensorError};
-use crate::layers::Sequential;
-use crate::loss::Loss;
-use crate::metrics::Metric;
-use crate::optimizer::Optimizer;
-use crate::tensor::Tensor;
+use crate::core::{Result, Tensor, TensorError};
+use crate::domain::models::Sequential;
+use crate::domain::ports::DataRepository;
+use crate::domain::services::loss::Loss;
+use crate::domain::services::metrics::Metric;
+use crate::domain::services::optimizer::Optimizer;
+use crate::domain::types::{DataConfig, Dataset, TaskKind};
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// Training configuration
@@ -158,6 +160,92 @@ impl Default for TrainingHistory {
   }
 }
 
+pub struct TrainRequest {
+  pub task: TaskKind,
+  pub data_config: DataConfig,
+  pub training_config: TrainingConfig,
+  pub validation_split: Option<f64>,
+  pub model: Sequential,
+  pub loss_fn: Box<dyn Loss>,
+  pub optimizer: Box<dyn Optimizer>,
+  pub train_metrics: Vec<Box<dyn Metric>>,
+  pub val_metrics: Vec<Box<dyn Metric>>,
+}
+
+pub struct TrainResponse {
+  pub task: TaskKind,
+  pub model: Sequential,
+  pub history: TrainingHistory,
+  pub train_dataset: Dataset,
+  pub validation_dataset: Option<Dataset>,
+}
+
+pub struct TrainMLPUsecase<R: DataRepository> {
+  data_repo: Arc<R>,
+}
+
+impl<R: DataRepository> TrainMLPUsecase<R> {
+  pub fn new(data_repo: Arc<R>) -> Self {
+    Self { data_repo }
+  }
+
+  pub fn execute(&self, request: TrainRequest) -> Result<TrainResponse> {
+    let TrainRequest {
+      task,
+      data_config,
+      training_config,
+      validation_split,
+      mut model,
+      loss_fn,
+      optimizer,
+      train_metrics,
+      val_metrics,
+    } = request;
+
+    let dataset = self.data_repo.load_dataset(&data_config)?;
+
+    let validation_split = validation_split.unwrap_or(0.0);
+    let (train_dataset, val_dataset) = if validation_split > 0.0 {
+      let (train, val) = dataset.train_test_split(validation_split)?;
+      (train, Some(val))
+    } else {
+      (dataset, None)
+    };
+
+    let (train_x, train_y) = train_dataset.to_tensors()?;
+    let val_tensors = val_dataset.as_ref().map(|d| d.to_tensors()).transpose()?;
+
+    let mut trainer =
+      Trainer::new_boxed(&mut model, loss_fn, optimizer).with_config(training_config);
+
+    for metric in train_metrics.into_iter() {
+      trainer = trainer.with_train_metric_box(metric);
+    }
+
+    for metric in val_metrics.into_iter() {
+      trainer = trainer.with_val_metric_box(metric);
+    }
+
+    let (val_x, val_y) = match val_tensors {
+      Some((vx, vy)) => (Some(vx), Some(vy)),
+      None => (None, None),
+    };
+
+    let history_ref = trainer.fit(&train_x, &train_y, val_x.as_ref(), val_y.as_ref())?;
+    let history = history_ref.clone();
+
+    drop(trainer);
+
+    Ok(TrainResponse {
+      task,
+      model,
+      history,
+      train_dataset,
+      validation_dataset: val_dataset,
+    })
+  }
+}
+
 /// Neural network trainer
 ///
 /// The Trainer orchestrates the training process, handling:
@@ -194,9 +282,7 @@ impl<'a> Trainer<'a> {
   /// # Examples
   /// ```
   /// use multilayer_perceptron::prelude::*;
-  /// use multilayer_perceptron::trainer::{Trainer, TrainingConfig};
-  /// use multilayer_perceptron::loss::BinaryCrossEntropy;
-  /// use multilayer_perceptron::optimizer::SGD;
+  /// use multilayer_perceptron::prelude::*;
   /// use std::cell::RefCell;
   /// use std::rc::Rc;
   ///
@@ -233,6 +319,27 @@ impl<'a> Trainer<'a> {
     }
   }
 
+  pub fn new_boxed(
+    model: &'a mut Sequential,
+    loss_fn: Box<dyn Loss>,
+    optimizer: Box<dyn Optimizer>,
+  ) -> Self {
+    let default_config = TrainingConfig {
+      learning_rate: optimizer.learning_rate(),
+      ..TrainingConfig::default()
+    };
+
+    Self {
+      model,
+      loss_fn,
+      optimizer,
+      train_metrics: Vec::new(),
+      val_metrics: Vec::new(),
+      config: default_config,
+      history: TrainingHistory::new(),
+    }
+  }
+
   /// Set training configuration
   pub fn with_config(mut self, config: TrainingConfig) -> Self {
     self.optimizer.set_learning_rate(config.learning_rate);
@@ -246,9 +353,19 @@ impl<'a> Trainer<'a> {
     self
   }
 
+  pub fn with_train_metric_box(mut self, metric: Box<dyn Metric>) -> Self {
+    self.train_metrics.push(metric);
+    self
+  }
+
   /// Add a validation metric
   pub fn with_val_metric<M: Metric + 'static>(mut self, metric: M) -> Self {
     self.val_metrics.push(Box::new(metric));
+    self
+  }
+
+  pub fn with_val_metric_box(mut self, metric: Box<dyn Metric>) -> Self {
+    self.val_metrics.push(metric);
     self
   }
 
@@ -625,11 +742,11 @@ impl<'a> Trainer<'a> {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::graph::ComputationGraph;
-  use crate::layers::Sequential;
-  use crate::loss::BinaryCrossEntropy;
-  use crate::metrics::Accuracy;
-  use crate::optimizer::SGD;
+  use crate::core::ComputationGraph;
+  use crate::domain::models::Sequential;
+  use crate::domain::services::loss::BinaryCrossEntropy;
+  use crate::domain::services::metrics::Accuracy;
+  use crate::domain::services::optimizer::SGD;
   use std::cell::RefCell;
   use std::rc::Rc;
 

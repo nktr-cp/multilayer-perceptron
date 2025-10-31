@@ -1,6 +1,6 @@
-use crate::error::{Result, TensorError};
-use crate::ops::OpNode;
-use crate::tensor::Tensor;
+use super::error::{Result, TensorError};
+use super::ops::OpNode;
+use super::tensor::Tensor;
 use ndarray::{Array2, Zip};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -318,7 +318,7 @@ impl Default for ComputationGraph {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::ops::OpBuilder;
+  use crate::core::ops::OpBuilder;
 
   #[test]
   fn test_reverse_postorder_efficiency() {

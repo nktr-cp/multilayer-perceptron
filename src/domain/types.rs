@@ -1,15 +1,15 @@
-//! Dataset module for handling breast cancer data loading and preprocessing
-//!
-//! This module provides functionality to load, preprocess, and manage the
-//! Wisconsin Breast Cancer dataset for training multilayer perceptron models.
-
-use crate::error::{Result, TensorError};
-use crate::tensor::Tensor;
+use crate::core::{Result, Tensor, TensorError};
 use ndarray::{Array1, Array2, Axis};
 use rand::seq::SliceRandom;
 use rand::SeedableRng;
 use std::collections::HashMap;
-use std::path::Path;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TaskKind {
+  BinaryClassification,
+  MultiClassification,
+  Regression,
+}
 
 /// Represents the diagnosis label for breast cancer classification
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,6 +60,8 @@ impl Default for PreprocessConfig {
     }
   }
 }
+
+pub type DataConfig = PreprocessConfig;
 
 #[derive(Debug, Clone)]
 pub struct FeatureStats {
@@ -151,6 +153,22 @@ impl Dataset {
     }
   }
 
+  pub fn from_parts(
+    features: Array2<f64>,
+    labels: Array1<f64>,
+    ids: Vec<u32>,
+    stats: Option<FeatureStats>,
+    config: PreprocessConfig,
+  ) -> Self {
+    Self {
+      features,
+      labels,
+      ids,
+      stats,
+      config,
+    }
+  }
+
   pub fn len(&self) -> usize {
     self.features.shape()[0]
   }
@@ -161,74 +179,6 @@ impl Dataset {
 
   pub fn n_features(&self) -> usize {
     self.features.shape()[1]
-  }
-
-  pub fn from_csv<P: AsRef<Path>>(path: P, config: PreprocessConfig) -> Result<Self> {
-    let file = std::fs::File::open(path)?;
-    let mut reader = csv::ReaderBuilder::new()
-      .has_headers(false)
-      .from_reader(file);
-
-    let mut records = Vec::new();
-
-    for result in reader.records() {
-      let record = result?;
-      if record.len() < 32 {
-        return Err(TensorError::InvalidValue(format!(
-          "Expected at least 32 columns, got {}",
-          record.len()
-        )));
-      }
-
-      let id: u32 = record[0]
-        .parse()
-        .map_err(|e| TensorError::InvalidValue(format!("Invalid ID: {}", e)))?;
-
-      // Parse diagnosis
-      let diagnosis = Diagnosis::parse(&record[1])?;
-
-      let mut features = Array1::zeros(30);
-      for i in 0..30 {
-        features[i] = record[i + 2].parse().map_err(|e| {
-          TensorError::InvalidValue(format!("Invalid feature value at column {}: {}", i + 2, e))
-        })?;
-      }
-
-      records.push(BreastCancerRecord {
-        id,
-        diagnosis,
-        features,
-      });
-    }
-
-    if records.is_empty() {
-      return Err(TensorError::InvalidValue(
-        "No data found in CSV file".to_string(),
-      ));
-    }
-
-    let n_samples = records.len();
-    let mut features_matrix = Array2::zeros((n_samples, 30));
-    let mut labels = Array1::zeros(n_samples);
-    let mut ids = Vec::with_capacity(n_samples);
-
-    for (i, record) in records.into_iter().enumerate() {
-      features_matrix.row_mut(i).assign(&record.features);
-      labels[i] = record.diagnosis.to_f64();
-      ids.push(record.id);
-    }
-
-    let mut dataset = Self {
-      features: features_matrix,
-      labels,
-      ids,
-      stats: None,
-      config,
-    };
-
-    dataset.preprocess()?;
-
-    Ok(dataset)
   }
 
   pub fn preprocess(&mut self) -> Result<()> {
@@ -401,6 +351,14 @@ impl DataLoader {
     }
   }
 
+  pub fn len(&self) -> usize {
+    self.dataset.len()
+  }
+
+  pub fn is_empty(&self) -> bool {
+    self.dataset.is_empty()
+  }
+
   pub fn num_batches(&self) -> usize {
     self.dataset.len().div_ceil(self.batch_size)
   }
@@ -547,7 +505,7 @@ pub mod utils {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use ndarray::Array1;
+  use approx::assert_abs_diff_eq;
 
   #[test]
   fn test_diagnosis_conversion() {
@@ -564,8 +522,8 @@ mod tests {
     let features = Array2::from_shape_vec((3, 2), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
     let stats = FeatureStats::from_features(&features);
 
-    assert!((stats.means[0] - 3.0).abs() < 1e-10);
-    assert!((stats.means[1] - 4.0).abs() < 1e-10);
+    assert_abs_diff_eq!(stats.means[0], 3.0, epsilon = 1e-10);
+    assert_abs_diff_eq!(stats.means[1], 4.0, epsilon = 1e-10);
   }
 
   #[test]
