@@ -52,7 +52,21 @@ export default function MLPDemo() {
   }, [])
 
   const handleStartTraining = useCallback(
-    ({ epochs, batchSize, validationSplit }: { epochs: number; batchSize: number; validationSplit: number }) => {
+    ({ 
+      epochs, 
+      batchSize, 
+      validationSplit, 
+      enableEarlyStopping, 
+      earlyStoppingPatience, 
+      earlyStoppingMinDelta 
+    }: { 
+      epochs: number; 
+      batchSize: number; 
+      validationSplit: number;
+      enableEarlyStopping: boolean;
+      earlyStoppingPatience: number;
+      earlyStoppingMinDelta: number;
+    }) => {
       if (!dataset.length) {
         return
       }
@@ -68,6 +82,9 @@ export default function MLPDemo() {
         batchSize,
         validationSplit,
         taskType: "binary",
+        enableEarlyStopping,
+        earlyStoppingPatience,
+        earlyStoppingMinDelta,
       })
     },
     [activationFn, dataset, l1Lambda, l2Lambda, layers, learningRate, optimizer, regularization, startTraining],
@@ -126,22 +143,35 @@ export default function MLPDemo() {
         >
           <div className="container mx-auto px-4 py-6">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-4">
                 <div className="relative">
                   <Brain className="w-8 h-8 text-primary animate-neural-pulse" />
                   <div className="absolute inset-0 blur-xl bg-primary/30 animate-pulse-glow" />
                 </div>
                 <div>
-                  <h1 className="text-2xl font-bold text-foreground">Neural Lab</h1>
-                  <p className="text-sm text-muted-foreground">Train Intelligence in Your Browser</p>
+                  <h1 className="text-2xl font-bold text-foreground">Neural Network Playground</h1>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm text-muted-foreground">Powered by</p>
+                    <div className="flex items-center gap-1">
+                      <span className="px-2 py-0.5 bg-orange-500/20 text-orange-400 text-xs font-mono rounded border border-orange-500/30">
+                        Rust
+                      </span>
+                      <span className="text-muted-foreground text-xs">+</span>
+                      <span className="px-2 py-0.5 bg-blue-500/20 text-blue-400 text-xs font-mono rounded border border-blue-500/30">
+                        WebAssembly
+                      </span>
+                    </div>
+                  </div>
                 </div>
               </div>
 
               <div className="flex items-center gap-4">
-                <a href="#" className="text-muted-foreground hover:text-foreground transition-colors">
-                  <BookOpen className="w-5 h-5" />
-                </a>
-                <a href="#" className="text-muted-foreground hover:text-foreground transition-colors">
+                <a 
+                  href="https://github.com/nktr-cp/multilayer-perceptron" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-muted-foreground hover:text-foreground transition-colors"
+                >
                   <Github className="w-5 h-5" />
                 </a>
               </div>
@@ -217,7 +247,7 @@ export default function MLPDemo() {
               <h2 className="text-lg font-semibold text-foreground mb-4 flex items-center gap-2">
                 <span className="text-primary">05</span> Console
               </h2>
-              <ConsoleOutput logs={logs} />
+              <ConsoleOutput isTraining={isTraining} logs={logs} />
             </motion.div>
           </div>
         </div>
