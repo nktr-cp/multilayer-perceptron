@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Sparkles, RefreshCw } from "lucide-react"
 
-interface DataPoint {
+export interface DataPoint {
   x: number
   y: number
   label: number
@@ -17,9 +17,26 @@ interface DataPoint {
 
 interface DatasetGeneratorProps {
   onDatasetGenerated?: (data: DataPoint[]) => void
+  decisionBoundary?: {
+    cells: { x: number; y: number; value: number }[]
+    step: number
+  }
 }
 
-export function DatasetGenerator({ onDatasetGenerated }: DatasetGeneratorProps) {
+const interpolateColor = (value: number) => {
+  const clamped = Math.max(0, Math.min(1, value))
+  const colorA = [6, 182, 212]
+  const colorB = [236, 72, 153]
+
+  const mixed = colorA.map((channel, index) => {
+    const target = colorB[index]
+    return Math.round(channel + (target - channel) * clamped)
+  })
+
+  return `rgb(${mixed[0]}, ${mixed[1]}, ${mixed[2]})`
+}
+
+export function DatasetGenerator({ onDatasetGenerated, decisionBoundary }: DatasetGeneratorProps) {
   const [datasetType, setDatasetType] = useState<"spiral" | "circular" | "xor" | "moons">("spiral")
   const [sampleSize, setSampleSize] = useState(200)
   const [noiseLevel, setNoiseLevel] = useState(0.1)
@@ -248,6 +265,17 @@ export function DatasetGenerator({ onDatasetGenerated }: DatasetGeneratorProps) 
         {/* Right side - Visualization */}
         <div className="relative aspect-square bg-background/50 rounded-lg border border-border/50 overflow-hidden">
           <svg viewBox="-6 -6 12 12" className="w-full h-full">
+            {decisionBoundary?.cells.map((cell, index) => (
+              <rect
+                key={`cell-${index}`}
+                x={cell.x - (decisionBoundary.step / 2)}
+                y={-(cell.y + decisionBoundary.step / 2)}
+                width={decisionBoundary.step}
+                height={decisionBoundary.step}
+                fill={interpolateColor(cell.value)}
+                opacity={0.3}
+              />
+            ))}
             <line x1="-6" y1="0" x2="6" y2="0" stroke="currentColor" strokeWidth="0.02" opacity="0.2" />
             <line x1="0" y1="-6" x2="0" y2="6" stroke="currentColor" strokeWidth="0.02" opacity="0.2" />
 

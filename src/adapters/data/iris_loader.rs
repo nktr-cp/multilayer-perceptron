@@ -98,14 +98,19 @@ mod tests {
   use crate::domain::types::PreprocessConfig;
   use std::fs::{remove_file, File};
   use std::io::Write;
+
+  #[cfg(not(target_arch = "wasm32"))]
   use std::time::{SystemTime, UNIX_EPOCH};
 
   #[test]
   fn test_iris_loader() {
+    #[cfg(not(target_arch = "wasm32"))]
     let timestamp = SystemTime::now()
       .duration_since(UNIX_EPOCH)
       .unwrap()
       .as_nanos();
+    #[cfg(target_arch = "wasm32")]
+    let timestamp = 12345u128;
     let csv_path = std::env::temp_dir().join(format!("iris_test_{timestamp}.csv"));
 
     let mut file = File::create(&csv_path).unwrap();

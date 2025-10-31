@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { motion } from "framer-motion"
 import { NetworkVisualizer } from "@/components/network-visualizer"
 import { LayerControlPanel } from "@/components/layer-control-panel"
@@ -8,18 +8,110 @@ import { TrainingDashboard } from "@/components/training-dashboard"
 import { OptimizerPanel } from "@/components/optimizer-panel"
 import { ConsoleOutput } from "@/components/console-output"
 import { NeuralBackground } from "@/components/neural-background"
-import { DatasetGenerator } from "@/components/dataset-generator"
+import { DatasetGenerator, type DataPoint } from "@/components/dataset-generator"
+import { useWASM } from "@/hooks/useWASM"
+import { useMLTraining } from "@/hooks/useMLTraining"
 import { Brain, Github, BookOpen } from "lucide-react"
 
 export default function MLPDemo() {
   const [layers, setLayers] = useState([2, 8, 8, 1])
   const [activationFn, setActivationFn] = useState("relu")
-  const [isTraining, setIsTraining] = useState(false)
   const [optimizer, setOptimizer] = useState<"gd" | "sgd" | "sgd_momentum" | "rmsprop" | "adam">("adam")
   const [learningRate, setLearningRate] = useState(0.01)
   const [regularization, setRegularization] = useState<"none" | "l1" | "l2" | "elastic_net">("none")
   const [l1Lambda, setL1Lambda] = useState(0.01)
   const [l2Lambda, setL2Lambda] = useState(0.01)
+  const [dataset, setDataset] = useState<DataPoint[]>([])
+
+  const { wasmModule, wasmError } = useWASM()
+  const {
+    startTraining,
+    resetTraining,
+    history,
+    metrics,
+    weights,
+    isTraining,
+    error: trainingError,
+    logs,
+    predict,
+    hasModel,
+  } = useMLTraining(wasmModule)
+  const [decisionBoundary, setDecisionBoundary] = useState<{ cells: { x: number; y: number; value: number }[]; step: number } | null>(null)
+
+  const handleDatasetGenerated = useCallback((points: DataPoint[]) => {
+    setDataset(points)
+    setDecisionBoundary(null)
+    setLayers((prev) => {
+      if (prev[0] === 2) {
+        return prev
+      }
+      const updated = [...prev]
+      updated[0] = 2
+      return updated
+    })
+  }, [])
+
+  const handleStartTraining = useCallback(
+    ({ epochs, batchSize, validationSplit }: { epochs: number; batchSize: number; validationSplit: number }) => {
+      if (!dataset.length) {
+        return
+      }
+
+      void startTraining({
+        layers,
+        activationFn,
+        optimizer,
+        learningRate,
+        regularization: { type: regularization, l1: l1Lambda, l2: l2Lambda },
+        dataset,
+        epochs,
+        batchSize,
+        validationSplit,
+        taskType: "binary",
+      })
+    },
+    [activationFn, dataset, l1Lambda, l2Lambda, layers, learningRate, optimizer, regularization, startTraining],
+  )
+
+  const handleReset = useCallback(() => {
+    resetTraining()
+    setDecisionBoundary(null)
+  }, [resetTraining])
+
+  useEffect(() => {
+    const predictor = predict
+    if (!predictor || !hasModel || !history || history.loss.length === 0 || isTraining) {
+      if (!predictor || !hasModel) {
+        setDecisionBoundary(null)
+      }
+      return
+    }
+
+    const range = 6
+    const resolution = 80
+    const step = (range * 2) / (resolution - 1)
+    const samples: { x: number; y: number }[] = []
+
+    for (let ix = 0; ix < resolution; ix++) {
+      for (let iy = 0; iy < resolution; iy++) {
+        const x = -range + step * ix
+        const y = -range + step * iy
+        samples.push({ x, y })
+      }
+    }
+
+    const values = predictor(samples)
+    const cells = samples.map((point, index) => ({
+      x: point.x,
+      y: point.y,
+      value: Number.isFinite(values[index]) ? values[index] : 0,
+    }))
+
+    setDecisionBoundary({ cells, step })
+  }, [predict, hasModel, history, isTraining])
+
+  const canTrain = useMemo(() => Boolean(wasmModule && dataset.length > 0), [dataset.length, wasmModule])
+  const combinedError = trainingError ?? wasmError ?? null
 
   return (
     <div className="relative min-h-screen bg-background neural-grid overflow-hidden">
@@ -65,7 +157,7 @@ export default function MLPDemo() {
                 <span className="text-primary">01</span> Data Generation
               </h2>
               <div className="space-y-6">
-                <DatasetGenerator />
+                <DatasetGenerator onDatasetGenerated={handleDatasetGenerated} decisionBoundary={decisionBoundary ?? undefined} />
               </div>
             </motion.div>
 
@@ -101,7 +193,7 @@ export default function MLPDemo() {
               <h2 className="text-lg font-semibold text-foreground mb-4 flex items-center gap-2">
                 <span className="text-primary">03</span> Network Architecture
               </h2>
-              <NetworkVisualizer layers={layers} isTraining={isTraining} activationFn={activationFn} />
+              <NetworkVisualizer layers={layers} isTraining={isTraining} activationFn={activationFn} weights={weights} />
             </motion.div>
 
             {/* Training Metrics */}
@@ -109,7 +201,15 @@ export default function MLPDemo() {
               <h2 className="text-lg font-semibold text-foreground mb-4 flex items-center gap-2">
                 <span className="text-primary">04</span> Training Metrics
               </h2>
-              <TrainingDashboard isTraining={isTraining} onToggleTraining={() => setIsTraining(!isTraining)} />
+              <TrainingDashboard
+                isTraining={isTraining}
+                canTrain={canTrain}
+                history={history}
+                metrics={metrics}
+                onStartTraining={handleStartTraining}
+                onReset={handleReset}
+                error={combinedError}
+              />
             </motion.div>
 
             {/* Console */}
@@ -117,7 +217,7 @@ export default function MLPDemo() {
               <h2 className="text-lg font-semibold text-foreground mb-4 flex items-center gap-2">
                 <span className="text-primary">05</span> Console
               </h2>
-              <ConsoleOutput isTraining={isTraining} />
+              <ConsoleOutput logs={logs} />
             </motion.div>
           </div>
         </div>

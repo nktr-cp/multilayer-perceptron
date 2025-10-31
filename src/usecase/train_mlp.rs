@@ -20,7 +20,27 @@ use crate::domain::services::optimizer::Optimizer;
 use crate::domain::types::{DataConfig, Dataset, TaskKind};
 use std::collections::HashMap;
 use std::sync::Arc;
+
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, Instant};
+
+#[cfg(target_arch = "wasm32")]
+use std::time::Duration;
+
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+extern "C" {
+  #[wasm_bindgen(js_namespace = console)]
+  fn log(s: &str);
+}
+
+#[cfg(target_arch = "wasm32")]
+macro_rules! console_log {
+  ($($t:tt)*) => (log(&format_args!($($t)*).to_string()))
+}
 
 /// Training configuration
 #[derive(Debug, Clone)]
@@ -465,6 +485,7 @@ impl<'a> Trainer<'a> {
     val_x: Option<&Tensor>,
     val_y: Option<&Tensor>,
   ) -> Result<&TrainingHistory> {
+    #[cfg(not(target_arch = "wasm32"))]
     let train_start = Instant::now();
 
     // Validate inputs
@@ -494,6 +515,7 @@ impl<'a> Trainer<'a> {
 
     // Training loop
     for epoch in 0..self.config.epochs {
+      #[cfg(not(target_arch = "wasm32"))]
       let epoch_start = Instant::now();
 
       // Shuffle data if configured
@@ -521,7 +543,10 @@ impl<'a> Trainer<'a> {
         (None, HashMap::new())
       };
 
+      #[cfg(not(target_arch = "wasm32"))]
       let epoch_time = epoch_start.elapsed();
+      #[cfg(target_arch = "wasm32")]
+      let epoch_time = std::time::Duration::from_secs(0);
 
       // Record epoch history
       let epoch_history = EpochHistory {
@@ -556,7 +581,14 @@ impl<'a> Trainer<'a> {
 
           if epochs_without_improvement >= self.config.early_stopping_patience {
             if self.config.verbose {
+              #[cfg(not(target_arch = "wasm32"))]
               println!(
+                "Early stopping triggered after {} epochs without improvement",
+                epochs_without_improvement
+              );
+
+              #[cfg(target_arch = "wasm32")]
+              console_log!(
                 "Early stopping triggered after {} epochs without improvement",
                 epochs_without_improvement
               );
@@ -569,7 +601,14 @@ impl<'a> Trainer<'a> {
     }
 
     // Finalize training history
-    self.history.total_time = train_start.elapsed();
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+      self.history.total_time = train_start.elapsed();
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+      self.history.total_time = std::time::Duration::from_secs(0);
+    }
     self.history.find_best_epoch();
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -584,9 +623,20 @@ impl<'a> Trainer<'a> {
     }
 
     if self.config.verbose {
-      println!("\nTraining completed in {:.2?}", self.history.total_time);
-      if let Some(best_epoch) = self.history.best_epoch {
-        println!("Best epoch: {} (0-indexed)", best_epoch);
+      #[cfg(not(target_arch = "wasm32"))]
+      {
+        println!("\nTraining completed in {:.2?}", self.history.total_time);
+        if let Some(best_epoch) = self.history.best_epoch {
+          println!("Best epoch: {} (0-indexed)", best_epoch);
+        }
+      }
+
+      #[cfg(target_arch = "wasm32")]
+      {
+        console_log!("Training completed in {:.2?}", self.history.total_time);
+        if let Some(best_epoch) = self.history.best_epoch {
+          console_log!("Best epoch: {} (0-indexed)", best_epoch);
+        }
       }
     }
 
@@ -787,26 +837,53 @@ impl<'a> Trainer<'a> {
 
   /// Print epoch progress
   fn print_epoch_progress(&self, epoch: usize, total_epochs: usize, epoch_history: &EpochHistory) {
-    print!(
-      "Epoch {}/{} - loss: {:.4}",
-      epoch, total_epochs, epoch_history.train_loss
-    );
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+      print!(
+        "Epoch {}/{} - loss: {:.4}",
+        epoch, total_epochs, epoch_history.train_loss
+      );
 
-    // Print training metrics
-    for (name, value) in &epoch_history.train_metrics {
-      print!(" - {}: {:.4}", name, value);
-    }
-
-    // Print validation metrics if available
-    if let Some(val_loss) = epoch_history.val_loss {
-      print!(" - val_loss: {:.4}", val_loss);
-      for (name, value) in &epoch_history.val_metrics {
-        print!(" - val_{}: {:.4}", name, value);
+      // Print training metrics
+      for (name, value) in &epoch_history.train_metrics {
+        print!(" - {}: {:.4}", name, value);
       }
+
+      // Print validation metrics if available
+      if let Some(val_loss) = epoch_history.val_loss {
+        print!(" - val_loss: {:.4}", val_loss);
+        for (name, value) in &epoch_history.val_metrics {
+          print!(" - val_{}: {:.4}", name, value);
+        }
+      }
+
+      print!(" - time: {:.2?}", epoch_history.training_time);
+      println!();
     }
 
-    print!(" - time: {:.2?}", epoch_history.training_time);
-    println!();
+    #[cfg(target_arch = "wasm32")]
+    {
+      let mut message = format!(
+        "Epoch {}/{} - loss: {:.4}",
+        epoch, total_epochs, epoch_history.train_loss
+      );
+
+      // Add training metrics
+      for (name, value) in &epoch_history.train_metrics {
+        message.push_str(&format!(" - {}: {:.4}", name, value));
+      }
+
+      // Add validation metrics if available
+      if let Some(val_loss) = epoch_history.val_loss {
+        message.push_str(&format!(" - val_loss: {:.4}", val_loss));
+        for (name, value) in &epoch_history.val_metrics {
+          message.push_str(&format!(" - val_{}: {:.4}", name, value));
+        }
+      }
+
+      message.push_str(&format!(" - time: {:.2?}", epoch_history.training_time));
+      console_log!("{}", message);
+    }
   }
 
   /// Get the training history

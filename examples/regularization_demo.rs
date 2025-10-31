@@ -99,6 +99,7 @@ fn train_without_regularization(
     early_stopping_min_delta: 0.05,
     enable_early_stopping: true,
     learning_rate: 0.0005,
+    show_gui_plots: false,
     regularization: None,
     #[cfg(not(target_arch = "wasm32"))]
     show_gui_plots: false,
@@ -173,12 +174,8 @@ fn train_with_regularization(
     learning_rate: 0.0005,
     regularization: Some(reg_config),
     #[cfg(not(target_arch = "wasm32"))]
-    show_gui_plots: false,
+    show_gui_plots: gui_plots_enabled(),
   };
-  #[cfg(not(target_arch = "wasm32"))]
-  {
-    config.show_gui_plots = gui_plots_enabled();
-  }
 
   let loss_fn = MeanSquaredError::new();
   let optimizer = SGD::new(config.learning_rate);

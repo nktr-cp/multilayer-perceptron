@@ -1,9 +1,12 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useMemo, useState } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Play, Pause, RotateCcw } from "lucide-react"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Slider } from "@/components/ui/slider"
+import { Play, RotateCcw } from "lucide-react"
 import { Line } from "react-chartjs-2"
 import {
   Chart as ChartJS,
@@ -21,60 +24,83 @@ ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, T
 
 interface TrainingDashboardProps {
   isTraining: boolean
-  onToggleTraining: () => void
+  canTrain: boolean
+  history: {
+    loss: number[]
+    accuracy: number[]
+    valLoss: (number | null)[]
+    valAccuracy: (number | null)[]
+  } | null
+  metrics: {
+    loss: number
+    accuracy?: number
+    precision?: number
+    recall?: number
+    f1Score?: number
+    mse?: number
+  } | null
+  onStartTraining: (config: { epochs: number; batchSize: number; validationSplit: number }) => void
+  onReset: () => void
+  error?: string | null
 }
 
-export function TrainingDashboard({ isTraining, onToggleTraining }: TrainingDashboardProps) {
-  const [epoch, setEpoch] = useState(0)
-  const [loss, setLoss] = useState(2.5)
-  const [accuracy, setAccuracy] = useState(0.33)
-  const [lossHistory, setLossHistory] = useState<number[]>([2.5])
-  const [accuracyHistory, setAccuracyHistory] = useState<number[]>([0.33])
+export function TrainingDashboard({
+  isTraining,
+  canTrain,
+  history,
+  metrics,
+  onStartTraining,
+  onReset,
+  error,
+}: TrainingDashboardProps) {
+  const [epochs, setEpochs] = useState(100)
+  const [batchSize, setBatchSize] = useState(32)
+  const [validationSplit, setValidationSplit] = useState(0.2)
 
-  useEffect(() => {
-    if (!isTraining) return
+  const currentEpoch = history?.loss.length ?? 0
+  const latestLoss = history?.loss.at(-1) ?? 0
+  const latestAccuracy = history?.accuracy.at(-1) ?? 0
+  const latestValLoss = history?.valLoss.at(-1) ?? null
+  const latestValAccuracy = history?.valAccuracy.at(-1) ?? null
 
-    const interval = setInterval(() => {
-      setEpoch((prev) => prev + 1)
-      setLoss((prev) => Math.max(0.01, prev * 0.95 + (Math.random() - 0.5) * 0.1))
-      setAccuracy((prev) => Math.min(0.99, prev + Math.random() * 0.02))
+  const chartData = useMemo(() => {
+    const labels = history ? history.loss.map((_, index) => (index + 1).toString()) : []
+    const datasets: any[] = []
 
-      setLossHistory((prev) => [...prev.slice(-49), loss])
-      setAccuracyHistory((prev) => [...prev.slice(-49), accuracy])
-    }, 500)
-
-    return () => clearInterval(interval)
-  }, [isTraining, loss, accuracy])
-
-  const handleReset = () => {
-    setEpoch(0)
-    setLoss(2.5)
-    setAccuracy(0.33)
-    setLossHistory([2.5])
-    setAccuracyHistory([0.33])
-  }
-
-  const chartData = {
-    labels: Array.from({ length: lossHistory.length }, (_, i) => i.toString()),
-    datasets: [
-      {
-        label: "Loss",
-        data: lossHistory,
+    if (history) {
+      datasets.push({
+        label: "Training Loss",
+        data: history.loss,
         borderColor: "oklch(0.7 0.25 195)",
         backgroundColor: "oklch(0.7 0.25 195 / 0.1)",
         fill: true,
         tension: 0.4,
         pointRadius: 0,
-      },
-    ],
-  }
+      })
+
+      if (history.valLoss.some((value) => value !== null)) {
+        datasets.push({
+          label: "Validation Loss",
+          data: history.valLoss.map((value) => value ?? NaN),
+          borderColor: "oklch(0.75 0.2 20)",
+          backgroundColor: "oklch(0.75 0.2 20 / 0.1)",
+          fill: true,
+          tension: 0.4,
+          pointRadius: 0,
+          spanGaps: true,
+        })
+      }
+    }
+
+    return { labels, datasets }
+  }, [history])
 
   const chartOptions = {
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
       legend: {
-        display: false,
+        display: true,
       },
     },
     scales: {
@@ -96,47 +122,151 @@ export function TrainingDashboard({ isTraining, onToggleTraining }: TrainingDash
     <Card className="glass-card glow-magenta p-6">
       <h3 className="text-lg font-semibold text-foreground mb-4">Training Metrics</h3>
 
-      {/* Metrics */}
       <div className="grid grid-cols-2 gap-4 mb-6">
         <div className="space-y-1">
           <p className="text-sm text-muted-foreground">Epoch</p>
-          <p className="text-2xl font-bold text-foreground">{epoch}</p>
+          <p className="text-2xl font-bold text-foreground">{currentEpoch}</p>
         </div>
         <div className="space-y-1">
           <p className="text-sm text-muted-foreground">Loss</p>
-          <p className="text-2xl font-bold text-primary">{loss.toFixed(4)}</p>
+          <p className="text-2xl font-bold text-primary">{latestLoss.toFixed(4)}</p>
         </div>
         <div className="space-y-1">
           <p className="text-sm text-muted-foreground">Accuracy</p>
-          <p className="text-2xl font-bold text-accent">{(accuracy * 100).toFixed(2)}%</p>
+          <p className="text-2xl font-bold text-accent">{(latestAccuracy * 100).toFixed(2)}%</p>
         </div>
         <div className="space-y-1">
-          <p className="text-sm text-muted-foreground">Speed</p>
-          <p className="text-2xl font-bold text-secondary">2.1 ep/s</p>
+          <p className="text-sm text-muted-foreground">Validation Loss</p>
+          <p className="text-2xl font-bold text-secondary">
+            {latestValLoss !== null && Number.isFinite(latestValLoss) ? latestValLoss.toFixed(4) : "—"}
+          </p>
         </div>
       </div>
 
-      {/* Loss Chart */}
-      <div className="h-32 mb-6">
-        <Line data={chartData} options={chartOptions} />
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div className="space-y-2">
+          <Label htmlFor="epochs" className="text-sm text-muted-foreground">
+            Epochs
+          </Label>
+          <Input
+            id="epochs"
+            type="number"
+            min={1}
+            value={epochs}
+            onChange={(event) => setEpochs(Math.max(1, Number.parseInt(event.target.value) || 1))}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="batch-size" className="text-sm text-muted-foreground">
+            Batch Size
+          </Label>
+          <Input
+            id="batch-size"
+            type="number"
+            min={1}
+            value={batchSize}
+            onChange={(event) => setBatchSize(Math.max(1, Number.parseInt(event.target.value) || 1))}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label className="text-sm text-muted-foreground">
+            Validation Split ({(validationSplit * 100).toFixed(0)}%)
+          </Label>
+          <Slider
+            value={[validationSplit * 100]}
+            onValueChange={([value]) => setValidationSplit(Math.round(value) / 100)}
+            min={0}
+            max={40}
+            step={5}
+          />
+        </div>
       </div>
 
-      {/* Controls */}
-      <div className="flex gap-2">
-        <Button onClick={onToggleTraining} className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground">
-          {isTraining ? (
-            <>
-              <Pause className="w-4 h-4 mr-2" />
-              Pause
-            </>
-          ) : (
-            <>
-              <Play className="w-4 h-4 mr-2" />
-              Train
-            </>
+      {metrics && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 text-sm">
+          <div className="space-y-1">
+            <p className="text-muted-foreground">Final Loss</p>
+            <p className="text-foreground font-medium">{metrics.loss.toFixed(4)}</p>
+          </div>
+          {metrics.accuracy !== undefined && (
+            <div className="space-y-1">
+              <p className="text-muted-foreground">Final Accuracy</p>
+              <p className="text-foreground font-medium">{(metrics.accuracy * 100).toFixed(2)}%</p>
+            </div>
           )}
+          {metrics.precision !== undefined && (
+            <div className="space-y-1">
+              <p className="text-muted-foreground">Precision</p>
+              <p className="text-foreground font-medium">{(metrics.precision * 100).toFixed(2)}%</p>
+            </div>
+          )}
+          {metrics.recall !== undefined && (
+            <div className="space-y-1">
+              <p className="text-muted-foreground">Recall</p>
+              <p className="text-foreground font-medium">{(metrics.recall * 100).toFixed(2)}%</p>
+            </div>
+          )}
+          {metrics.f1Score !== undefined && (
+            <div className="space-y-1">
+              <p className="text-muted-foreground">F1 Score</p>
+              <p className="text-foreground font-medium">{(metrics.f1Score * 100).toFixed(2)}%</p>
+            </div>
+          )}
+          {metrics.mse !== undefined && (
+            <div className="space-y-1">
+              <p className="text-muted-foreground">MSE</p>
+              <p className="text-foreground font-medium">{metrics.mse.toFixed(4)}</p>
+            </div>
+          )}
+          {latestValAccuracy !== null && Number.isFinite(latestValAccuracy) && (
+            <div className="space-y-1">
+              <p className="text-muted-foreground">Validation Accuracy</p>
+              <p className="text-foreground font-medium">{(latestValAccuracy * 100).toFixed(2)}%</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="h-40 mb-6">
+        {history && history.loss.length > 0 ? (
+          <Line data={chartData} options={chartOptions} />
+        ) : (
+          <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+            Train the model to visualize loss curves
+          </div>
+        )}
+      </div>
+
+      {error ? (
+        <p className="text-sm text-red-400 mb-4">{error}</p>
+      ) : (
+        !canTrain && (
+          <p className="text-sm text-muted-foreground mb-4">
+            Generate a dataset and ensure the WASM module has loaded to enable training.
+          </p>
+        )
+      )}
+
+      <div className="flex gap-2">
+        <Button
+          onClick={() => onStartTraining({ epochs, batchSize, validationSplit })}
+          className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground"
+          disabled={!canTrain || isTraining}
+        >
+          <Play className="w-4 h-4 mr-2" />
+          {isTraining ? "Training..." : "Train"}
         </Button>
-        <Button onClick={handleReset} variant="outline" className="border-border/50 hover:bg-muted/50 bg-transparent">
+        <Button
+          onClick={() => {
+            onReset()
+            setEpochs(100)
+            setBatchSize(32)
+            setValidationSplit(0.2)
+          }}
+          variant="outline"
+          className="border-border/50 hover:bg-muted/50 bg-transparent"
+          disabled={isTraining}
+        >
           <RotateCcw className="w-4 h-4" />
         </Button>
       </div>
