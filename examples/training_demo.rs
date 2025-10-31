@@ -8,9 +8,24 @@ use multilayer_perceptron::usecase::preprocess::build_pipeline;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+fn gui_plots_enabled() -> bool {
+  #[cfg(not(target_arch = "wasm32"))]
+  {
+    matches!(std::env::var("SHOW_GUI_PLOTS"), Ok(value) if value != "0")
+  }
+  #[cfg(target_arch = "wasm32")]
+  {
+    false
+  }
+}
+
 fn main() -> Result<()> {
   println!("🚀 Multilayer Perceptron Training Demo");
   println!("======================================");
+
+  if gui_plots_enabled() {
+    println!("🖥️  Native learning curve visualizer enabled (SHOW_GUI_PLOTS ≠ 0)");
+  }
 
   println!("\n=== Binary Classification Demo ===");
   demo_binary_classification()?;
@@ -59,7 +74,7 @@ fn demo_binary_classification() -> Result<()> {
   // Setup training components
   println!("\n⚙️  Setting up training components...");
   let full_batch_size = train_x.shape().0;
-  let config = TrainingConfig {
+  let mut config = TrainingConfig {
     epochs: 500,
     batch_size: full_batch_size,
     shuffle: false,
@@ -70,7 +85,14 @@ fn demo_binary_classification() -> Result<()> {
     enable_early_stopping: true,
     learning_rate: 0.01,
     regularization: None,
+    #[cfg(not(target_arch = "wasm32"))]
+    show_gui_plots: false,
   };
+  #[cfg(not(target_arch = "wasm32"))]
+  {
+    let gui_enabled = gui_plots_enabled();
+    config.show_gui_plots = gui_enabled;
+  }
   let loss_fn = BinaryCrossEntropy::new();
   let optimizer = SGD::new(config.learning_rate);
   println!(
@@ -207,7 +229,7 @@ fn demo_regression() -> Result<()> {
 
   // Setup training components for regression
   println!("\n⚙️  Setting up regression training components...");
-  let config = TrainingConfig {
+  let mut config = TrainingConfig {
     epochs: 400,
     batch_size: 32,
     shuffle: true,
@@ -218,7 +240,14 @@ fn demo_regression() -> Result<()> {
     enable_early_stopping: true,
     learning_rate: 0.0005,
     regularization: Some(RegularizationConfig::l2_only(0.02)),
+    #[cfg(not(target_arch = "wasm32"))]
+    show_gui_plots: false,
   };
+  #[cfg(not(target_arch = "wasm32"))]
+  {
+    let gui_enabled = gui_plots_enabled();
+    config.show_gui_plots = gui_enabled;
+  }
 
   let loss_fn = MeanSquaredError::new(); // MSE for regression
   let optimizer = SGD::new(config.learning_rate);
@@ -329,7 +358,7 @@ fn demo_multiclass() -> Result<()> {
 
   // Setup training components for multi-class classification
   println!("\n⚙️  Setting up multi-class training components...");
-  let config = TrainingConfig {
+  let mut config = TrainingConfig {
     epochs: 200,
     batch_size: 16,
     shuffle: true,
@@ -340,7 +369,14 @@ fn demo_multiclass() -> Result<()> {
     enable_early_stopping: true,
     learning_rate: 0.01,
     regularization: None,
+    #[cfg(not(target_arch = "wasm32"))]
+    show_gui_plots: false,
   };
+  #[cfg(not(target_arch = "wasm32"))]
+  {
+    let gui_enabled = gui_plots_enabled();
+    config.show_gui_plots = gui_enabled;
+  }
 
   let loss_fn = CrossEntropy::new(); // Cross-entropy for multi-class
   let optimizer = SGD::new(config.learning_rate);

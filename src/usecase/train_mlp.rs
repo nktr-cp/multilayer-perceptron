@@ -5,6 +5,8 @@
 //! forward propagation, backward propagation, and parameter optimization.
 
 use super::preprocess::build_pipeline;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::adapters::presentation::NativeVisualizer;
 use crate::core::{Result, Tensor, TensorError};
 use crate::domain::models::{Activation, Sequential};
 use crate::domain::ports::DataRepository;
@@ -43,6 +45,9 @@ pub struct TrainingConfig {
   pub learning_rate: f64,
   /// Optional regularization configuration applied during training
   pub regularization: Option<RegularizationConfig>,
+  /// Whether to display native GUI plots (only available on non-wasm targets)
+  #[cfg(not(target_arch = "wasm32"))]
+  pub show_gui_plots: bool,
 }
 
 impl Default for TrainingConfig {
@@ -58,6 +63,8 @@ impl Default for TrainingConfig {
       enable_early_stopping: true,
       learning_rate: 0.01,
       regularization: None,
+      #[cfg(not(target_arch = "wasm32"))]
+      show_gui_plots: false,
     }
   }
 }
@@ -564,6 +571,17 @@ impl<'a> Trainer<'a> {
     // Finalize training history
     self.history.total_time = train_start.elapsed();
     self.history.find_best_epoch();
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+      if self.config.show_gui_plots {
+        if let Err(e) = NativeVisualizer::show_curves(&self.history) {
+          if self.config.verbose {
+            println!("Warning: Failed to show GUI plots: {}", e);
+          }
+        }
+      }
+    }
 
     if self.config.verbose {
       println!("\nTraining completed in {:.2?}", self.history.total_time);

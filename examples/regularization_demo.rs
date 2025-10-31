@@ -8,6 +8,17 @@ use multilayer_perceptron::usecase::preprocess::build_pipeline;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+fn gui_plots_enabled() -> bool {
+  #[cfg(not(target_arch = "wasm32"))]
+  {
+    matches!(std::env::var("SHOW_GUI_PLOTS"), Ok(value) if value != "0")
+  }
+  #[cfg(target_arch = "wasm32")]
+  {
+    false
+  }
+}
+
 fn main() -> Result<()> {
   println!("🎯 Minimal Regularization Demo");
   println!("==============================");
@@ -78,7 +89,7 @@ fn train_without_regularization(
     .with_graph(graph);
 
   // Setup training components for regression
-  let config = TrainingConfig {
+  let mut config = TrainingConfig {
     epochs: 400,
     batch_size: 32,
     shuffle: true,
@@ -89,7 +100,13 @@ fn train_without_regularization(
     enable_early_stopping: true,
     learning_rate: 0.0005,
     regularization: None,
+    #[cfg(not(target_arch = "wasm32"))]
+    show_gui_plots: false,
   };
+  #[cfg(not(target_arch = "wasm32"))]
+  {
+    config.show_gui_plots = gui_plots_enabled();
+  }
 
   let loss_fn = MeanSquaredError::new(); // MSE for regression
   let optimizer = SGD::new(config.learning_rate);
@@ -144,7 +161,7 @@ fn train_with_regularization(
     .linear_layer(16, 1)
     .with_graph(graph);
 
-  let config = TrainingConfig {
+  let mut config = TrainingConfig {
     epochs: 400,
     batch_size: 32,
     shuffle: true,
@@ -155,7 +172,13 @@ fn train_with_regularization(
     enable_early_stopping: true,
     learning_rate: 0.0005,
     regularization: Some(reg_config),
+    #[cfg(not(target_arch = "wasm32"))]
+    show_gui_plots: false,
   };
+  #[cfg(not(target_arch = "wasm32"))]
+  {
+    config.show_gui_plots = gui_plots_enabled();
+  }
 
   let loss_fn = MeanSquaredError::new();
   let optimizer = SGD::new(config.learning_rate);

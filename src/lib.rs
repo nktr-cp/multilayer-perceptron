@@ -55,6 +55,8 @@ pub mod prelude {
   pub use crate::adapters::data::{
     BostonHousingRepository, BreastCancerRepository, IrisRepository,
   };
+  #[cfg(not(target_arch = "wasm32"))]
+  pub use crate::adapters::presentation::NativeVisualizer;
   pub use crate::core::{
     ComputationGraph, EdgeId, GraphEdge, GraphNode, NodeId, OpBuilder, OpNode, Result, Tensor,
     TensorError,
