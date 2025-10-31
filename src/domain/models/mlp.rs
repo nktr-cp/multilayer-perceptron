@@ -1,5 +1,6 @@
 use super::layer::{Activation, DenseLayer, Layer, WeightInit};
 use crate::core::{ComputationGraph, Result, Tensor};
+use crate::domain::services::loss::RegularizableModel;
 
 /// Sequential model for building neural networks layer by layer
 ///
@@ -296,6 +297,57 @@ impl std::fmt::Display for ModelSummary {
     writeln!(f, "Total params: {}", self.total_params)?;
 
     Ok(())
+  }
+}
+
+impl RegularizableModel for Sequential {
+  fn weight_tensors(&self) -> Vec<&Tensor> {
+    let mut weights = Vec::new();
+    for layer in &self.layers {
+      if let Some(dense_layer) = layer.as_any().downcast_ref::<DenseLayer>() {
+        weights.push(dense_layer.weights());
+      }
+    }
+    weights
+  }
+
+  fn bias_tensors(&self) -> Vec<&Tensor> {
+    let mut biases = Vec::new();
+    for layer in &self.layers {
+      if let Some(dense_layer) = layer.as_any().downcast_ref::<DenseLayer>() {
+        biases.push(dense_layer.bias());
+      }
+    }
+    biases
+  }
+
+  fn add_regularization_gradients(&mut self, weight_grads: Vec<Tensor>, bias_grads: Vec<Tensor>) {
+    let mut weight_idx = 0;
+    let mut bias_idx = 0;
+
+    for layer in &mut self.layers {
+      if let Some(dense_layer) = layer.as_any_mut().downcast_mut::<DenseLayer>() {
+        if weight_idx < weight_grads.len() && bias_idx < bias_grads.len() {
+          // Add regularization gradients to existing gradients
+          if let Some(existing_weight_grad) = dense_layer.weights_mut().grad.as_mut() {
+            // Add element-wise using ndarray operations
+            *existing_weight_grad = existing_weight_grad.clone() + &weight_grads[weight_idx].data;
+          } else {
+            dense_layer.weights_mut().grad = Some(weight_grads[weight_idx].data.clone());
+          }
+
+          if let Some(existing_bias_grad) = dense_layer.bias_mut().grad.as_mut() {
+            // Add element-wise using ndarray operations
+            *existing_bias_grad = existing_bias_grad.clone() + &bias_grads[bias_idx].data;
+          } else {
+            dense_layer.bias_mut().grad = Some(bias_grads[bias_idx].data.clone());
+          }
+
+          weight_idx += 1;
+          bias_idx += 1;
+        }
+      }
+    }
   }
 }
 
