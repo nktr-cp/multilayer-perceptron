@@ -62,11 +62,12 @@ pub mod prelude {
   };
   pub use crate::domain::services::loss::{BinaryCrossEntropy, Loss, MeanSquaredError};
   pub use crate::domain::services::metrics::{
-    Accuracy, BinaryClassificationMetrics, F1Score, Metric, Precision, Recall,
+    Accuracy, BinaryClassificationMetrics, CategoricalAccuracy, F1Score, MeanSquaredErrorMetric,
+    Metric, Precision, Recall,
   };
   pub use crate::domain::services::optimizer::{GradientDescent, Optimizer, SGDMomentum, SGD};
   pub use crate::domain::types::{
-    DataConfig, DataLoader, Dataset, Diagnosis, FeatureStats, PreprocessConfig, TaskKind,
+    DataConfig, DataLoader, Dataset, FeatureStats, PreprocessConfig, TaskKind,
   };
   pub use crate::domain::{DataRepository, ModelRepository};
   pub use crate::usecase::train_mlp::{
