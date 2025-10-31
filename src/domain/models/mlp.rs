@@ -258,48 +258,6 @@ pub struct LayerInfo {
   pub param_count: usize,
 }
 
-/// Summary information about the model
-#[derive(Debug, Clone)]
-pub struct ModelSummary {
-  pub layers: Vec<LayerInfo>,
-  pub total_params: usize,
-}
-
-impl std::fmt::Display for ModelSummary {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    writeln!(f, "Model Summary")?;
-    writeln!(f, "=============")?;
-    writeln!(
-      f,
-      "{:<15} {:<20} {:<20} {:<15}",
-      "Layer", "Input Shape", "Output Shape", "Params"
-    )?;
-    writeln!(
-      f,
-      "-----------------------------------------------------------------------------"
-    )?;
-
-    for layer in &self.layers {
-      writeln!(
-        f,
-        "{:<15} {:<20} {:<20} {:<15}",
-        layer.name,
-        format!("({}, {})", layer.input_shape.0, layer.input_shape.1),
-        format!("({}, {})", layer.output_shape.0, layer.output_shape.1),
-        layer.param_count
-      )?;
-    }
-
-    writeln!(
-      f,
-      "============================================================================="
-    )?;
-    writeln!(f, "Total params: {}", self.total_params)?;
-
-    Ok(())
-  }
-}
-
 impl RegularizableModel for Sequential {
   fn weight_tensors(&self) -> Vec<&Tensor> {
     let mut weights = Vec::new();
@@ -348,6 +306,48 @@ impl RegularizableModel for Sequential {
         }
       }
     }
+  }
+}
+
+/// Summary information about the model
+#[derive(Debug, Clone)]
+pub struct ModelSummary {
+  pub layers: Vec<LayerInfo>,
+  pub total_params: usize,
+}
+
+impl std::fmt::Display for ModelSummary {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    writeln!(f, "Model Summary")?;
+    writeln!(f, "=============")?;
+    writeln!(
+      f,
+      "{:<15} {:<20} {:<20} {:<15}",
+      "Layer", "Input Shape", "Output Shape", "Params"
+    )?;
+    writeln!(
+      f,
+      "-----------------------------------------------------------------------------"
+    )?;
+
+    for layer in &self.layers {
+      writeln!(
+        f,
+        "{:<15} {:<20} {:<20} {:<15}",
+        layer.name,
+        format!("({}, {})", layer.input_shape.0, layer.input_shape.1),
+        format!("({}, {})", layer.output_shape.0, layer.output_shape.1),
+        layer.param_count
+      )?;
+    }
+
+    writeln!(
+      f,
+      "============================================================================="
+    )?;
+    writeln!(f, "Total params: {}", self.total_params)?;
+
+    Ok(())
   }
 }
 
