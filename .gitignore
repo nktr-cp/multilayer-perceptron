@@ -54,6 +54,7 @@ Thumbs.db
 checkpoints/
 logs/
 plots/
+models/
 
 multilayer-perceptron.pdf
 multilayer-perceptron.md
