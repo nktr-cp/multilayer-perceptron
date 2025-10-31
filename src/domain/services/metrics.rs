@@ -3,8 +3,8 @@
 //! This module provides various metrics to evaluate the performance of
 //! trained models, particularly for binary classification tasks.
 
-use crate::error::Result;
-use crate::tensor::Tensor;
+use crate::core::{Result, Tensor};
+use std::cmp::Ordering;
 
 /// Binary classification metrics
 ///
@@ -368,6 +368,91 @@ impl Metric for F1Score {
   }
 }
 
+/// Categorical accuracy metric for multi-class classification
+#[derive(Debug, Clone, Default)]
+pub struct CategoricalAccuracy;
+
+impl Metric for CategoricalAccuracy {
+  fn compute(&self, predictions: &Tensor, targets: &Tensor) -> Result<f64> {
+    let rows = predictions.shape().0;
+    if rows == 0 {
+      return Ok(1.0);
+    }
+
+    let pred_cols = predictions.shape().1;
+    let target_cols = targets.shape().1;
+    assert!(
+      target_cols == 1 || target_cols == pred_cols,
+      "Targets must be class indices (n x 1) or one-hot vectors"
+    );
+
+    let mut correct = 0;
+
+    for i in 0..rows {
+      let pred_class = predictions
+        .data
+        .row(i)
+        .iter()
+        .enumerate()
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(Ordering::Equal))
+        .map(|(idx, _)| idx)
+        .unwrap_or(0);
+
+      let target_class = if target_cols == 1 {
+        targets.data[[i, 0]]
+          .round()
+          .clamp(0.0, (pred_cols.saturating_sub(1)) as f64) as usize
+      } else {
+        targets
+          .data
+          .row(i)
+          .iter()
+          .enumerate()
+          .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(Ordering::Equal))
+          .map(|(idx, _)| idx)
+          .unwrap_or(0)
+      };
+
+      if pred_class == target_class {
+        correct += 1;
+      }
+    }
+
+    Ok(correct as f64 / rows as f64)
+  }
+
+  fn name(&self) -> &'static str {
+    "categorical_accuracy"
+  }
+}
+
+/// Mean squared error metric for regression tasks
+#[derive(Debug, Clone, Default)]
+pub struct MeanSquaredErrorMetric;
+
+impl Metric for MeanSquaredErrorMetric {
+  fn compute(&self, predictions: &Tensor, targets: &Tensor) -> Result<f64> {
+    assert_eq!(
+      predictions.shape(),
+      targets.shape(),
+      "Predictions and targets must have identical shapes"
+    );
+
+    let diff = targets.sub(predictions)?;
+    let squared = diff.mul(&diff)?;
+    let mse = squared.mean()?;
+    Ok(mse.data[[0, 0]])
+  }
+
+  fn name(&self) -> &'static str {
+    "mse"
+  }
+
+  fn higher_is_better(&self) -> bool {
+    false
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -582,5 +667,33 @@ mod tests {
     let targets = Tensor::new(vec![vec![1.0]]).unwrap();
 
     BinaryClassificationMetrics::from_predictions(&predictions, &targets, 0.5).unwrap();
+  }
+
+  #[test]
+  fn test_categorical_accuracy_one_hot() {
+    let predictions = Tensor::new(vec![vec![0.2, 0.8], vec![0.7, 0.3]]).unwrap();
+    let targets = Tensor::new(vec![vec![0.0, 1.0], vec![1.0, 0.0]]).unwrap();
+    let metric = CategoricalAccuracy;
+    let score = metric.compute(&predictions, &targets).unwrap();
+    assert_abs_diff_eq!(score, 1.0, epsilon = 1e-9);
+  }
+
+  #[test]
+  fn test_categorical_accuracy_class_indices() {
+    let predictions = Tensor::new(vec![vec![0.6, 0.4], vec![0.1, 0.9]]).unwrap();
+    let targets = Tensor::new(vec![vec![0.0], vec![1.0]]).unwrap();
+    let metric = CategoricalAccuracy;
+    let score = metric.compute(&predictions, &targets).unwrap();
+    assert_abs_diff_eq!(score, 1.0, epsilon = 1e-9);
+  }
+
+  #[test]
+  fn test_mean_squared_error_metric() {
+    let predictions = Tensor::new(vec![vec![1.0], vec![2.0]]).unwrap();
+    let targets = Tensor::new(vec![vec![1.0], vec![3.0]]).unwrap();
+    let metric = MeanSquaredErrorMetric;
+    let score = metric.compute(&predictions, &targets).unwrap();
+    assert_abs_diff_eq!(score, 0.5, epsilon = 1e-9);
+    assert!(!metric.higher_is_better());
   }
 }

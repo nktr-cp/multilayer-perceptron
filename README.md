@@ -8,12 +8,11 @@ Visit the live demo: [https://nktr-cp.github.io/multilayer-perceptron/](https://
 
 ## ✨ Features
 
-- **Interactive Neural Network Training**: Train a multilayer perceptron directly in your browser
-- **Real-time Visualization**: Watch loss curves and accuracy metrics update in real-time
-- **Multiple Dataset Types**: Choose from various classification problems (XOR, circular, spiral patterns, etc.)
-- **WebAssembly Performance**: High-performance neural network computation using Rust and WebAssembly
-- **Responsive Design**: Works on desktop and mobile devices
-- **No Backend Required**: Everything runs client-side in your browser
+- **Clean Architecture Core**: domain/usecase/adapters layers keep business logic decoupled from delivery concerns.
+- **Task-aware Training Pipeline**: switch between binary classification, multi-class classification, and regression via a simple `TaskKind` enum; default losses/metrics/activations are selected automatically.
+- **Composable Preprocessing**: build transform pipelines (standardisation, normalisation, …) that can be fitted on the training split and reused on validation/test data.
+- **Interactive Neural Network Training**: Train a multilayer perceptron directly in your browser with real-time feedback.
+- **WebAssembly Performance**: High-performance neural network computation using Rust and WebAssembly with a responsive UI.
 
 ## 🚀 Quick Start
 
@@ -57,6 +56,45 @@ make deploy-local
 # or
 npm run serve:dist
 ```
+
+## 🧭 Task Configuration & Preprocessing
+
+- Select the learning objective with `domain::types::TaskKind` (`BinaryClassification`, `MultiClassification`, `Regression`).
+- Leave `TrainRequest.loss_fn`, `train_metrics`, or `val_metrics` empty to let the use case choose sensible defaults (e.g. BCE + accuracy/precision/recall/F1 for binary classification, MSE for regression).
+- Assemble preprocessing steps with `usecase::preprocess::build_pipeline` and fit them on the training split before applying them to validation/test data.
+
+```rust
+use multilayer_perceptron::prelude::*;
+use multilayer_perceptron::usecase::preprocess::build_pipeline;
+use multilayer_perceptron::usecase::{TrainMLPUsecase, TrainRequest};
+
+let data_config = DataConfig::default();
+let training_config = TrainingConfig {
+    epochs: 100,
+    batch_size: 32,
+    ..Default::default()
+};
+
+let mut request = TrainRequest {
+    task: TaskKind::MultiClassification,
+    data_config: data_config.clone(),
+    training_config,
+    validation_split: Some(0.2),
+    model: Sequential::new()
+      .relu_layer(64, 32)
+      .softmax_layer(32, 10),
+    optimizer: Box::new(SGD::new(0.01)),
+    loss_fn: None,               // auto-selected
+    train_metrics: Vec::new(),    // auto-selected
+    val_metrics: Vec::new(),      // auto-selected
+};
+
+let mut pipeline = build_pipeline(&request.data_config);
+let mut train_usecase = TrainMLPUsecase::new(data_repo.clone());
+let response = train_usecase.execute(request)?;
+```
+
+`TrainMLPUsecase` will adjust the model's output activation, choose a loss/metric bundle, and ensure the preprocessing pipeline is applied consistently across training and validation datasets.
 
 ## 📦 Building and Deployment
 
@@ -105,26 +143,30 @@ The build process includes several optimizations for WebAssembly:
 ## 🏗️ Project Structure
 
 ```
-├── .github/workflows/
-│   └── deploy.yml          # GitHub Actions workflow for deployment
-├── src/                    # Rust source code
-│   ├── lib.rs             # Main library
-│   ├── tensor.rs          # Tensor operations
-│   ├── layers.rs          # Neural network layers
-│   ├── trainer.rs         # Training logic
-│   └── wasm.rs            # WebAssembly bindings
-├── www/                   # Web frontend
-│   ├── index.html         # Main HTML file
-│   ├── index.js           # JavaScript entry point
-│   └── style.css          # Styles
-├── pkg/                   # Generated WebAssembly package
-├── dist/                  # Built static files (GitHub Pages)
-├── Cargo.toml             # Rust configuration
-├── package.json           # Node.js configuration
-├── webpack.config.js      # Webpack build configuration
-├── wasm-pack.toml         # WebAssembly optimization settings
-└── Makefile               # Build automation
+src/
+├── core/          # tensor, graph, ops primitives (pure math)
+├── domain/        # business rules: MLP model, losses, metrics, ports, TaskKind
+├── usecase/       # application services (training, preprocessing, inference)
+├── adapters/      # external implementations (CSV loader, WASM bindings, native presentation)
+├── app/           # high-level façade / integration glue
+├── bin/           # CLI entrypoints
+└── lib.rs         # crate exports & prelude
+
+www/               # Web front-end assets
+.github/workflows/ # CI pipelines
 ```
+
+### Clean Architecture Flow
+
+```
+            adapters ─┐
+                      ▼
+bin/app ─▶ usecase ─▶ domain ─▶ core
+                      ▲
+                      └── ports (traits)
+```
+
+Each outer layer depends only on the layer directly beneath it. Adapters implement the `domain::ports` traits, while use cases orchestrate datasets, preprocessing pipelines, optimisers, and task-aware strategy selection.
 
 ## 🧪 Testing
 

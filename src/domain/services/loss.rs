@@ -3,8 +3,7 @@
 //! This module provides different loss functions for computing the error
 //! between model predictions and true labels during training.
 
-use crate::error::Result;
-use crate::tensor::Tensor;
+use crate::core::{Result, Tensor};
 
 /// Trait for loss functions
 pub trait Loss {
@@ -60,7 +59,7 @@ impl BinaryCrossEntropy {
   ///
   /// # Examples
   /// ```
-  /// use multilayer_perceptron::loss::BinaryCrossEntropy;
+  /// use multilayer_perceptron::prelude::*;
   ///
   /// let loss_fn = BinaryCrossEntropy::new();
   /// ```
@@ -75,7 +74,7 @@ impl BinaryCrossEntropy {
   ///
   /// # Examples
   /// ```
-  /// use multilayer_perceptron::loss::BinaryCrossEntropy;
+  /// use multilayer_perceptron::prelude::*;
   ///
   /// let loss_fn = BinaryCrossEntropy::with_epsilon(1e-10);
   /// ```
@@ -194,7 +193,7 @@ impl MeanSquaredError {
   ///
   /// # Examples
   /// ```
-  /// use multilayer_perceptron::loss::MeanSquaredError;
+  /// use multilayer_perceptron::prelude::*;
   ///
   /// let loss_fn = MeanSquaredError::new();
   /// ```

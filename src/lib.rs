@@ -37,45 +37,43 @@
 
 #![warn(clippy::all)]
 
-// Module declarations will be added as we implement them
-pub mod dataset;
-pub mod error;
-pub mod generic_dataset;
-pub mod graph;
-pub mod layers;
-pub mod loss;
-pub mod metrics;
-pub mod ops;
-pub mod optimizer;
-pub mod tensor;
-pub mod trainer;
+pub mod adapters;
+pub mod app;
+pub mod core;
+pub mod domain;
+pub mod usecase;
 
 // WebAssembly bindings (only included when targeting wasm32)
 #[cfg(target_arch = "wasm32")]
-pub mod wasm;
+pub use crate::adapters::presentation::wasm;
 
 /// Prelude module for convenient imports
 ///
 /// This module re-exports the most commonly used types and functions
 /// for convenient access when using the multilayer perceptron library.
 pub mod prelude {
-  pub use crate::dataset::{DataLoader, Dataset, Diagnosis, FeatureStats, PreprocessConfig};
-  pub use crate::error::{Result, TensorError};
-  pub use crate::generic_dataset::{
-    load_csv, parse_field, CsvConfig, DataValue, DatasetLike, GenericDataFrame,
+  pub use crate::adapters::data::{csv_repo::CsvDataRepository, generic_repo::*};
+  pub use crate::core::{
+    ComputationGraph, EdgeId, GraphEdge, GraphNode, NodeId, OpBuilder, OpNode, Result, Tensor,
+    TensorError,
   };
-  pub use crate::graph::{ComputationGraph, EdgeId, GraphEdge, GraphNode, NodeId};
-  pub use crate::layers::{
-    Activation, DenseLayer, Layer, LayerInfo, ModelSummary, Sequential, WeightInit,
+  pub use crate::domain::models::{
+    Activation, DenseLayer, Layer, LayerInfo, ModelSummary, Sequential, WeightInit, MLP,
   };
-  pub use crate::loss::{BinaryCrossEntropy, Loss, MeanSquaredError};
-  pub use crate::metrics::{
-    Accuracy, BinaryClassificationMetrics, F1Score, Metric, Precision, Recall,
+  pub use crate::domain::services::loss::{BinaryCrossEntropy, Loss, MeanSquaredError};
+  pub use crate::domain::services::metrics::{
+    Accuracy, BinaryClassificationMetrics, CategoricalAccuracy, F1Score, MeanSquaredErrorMetric,
+    Metric, Precision, Recall,
   };
-  pub use crate::ops::{OpBuilder, OpNode};
-  pub use crate::optimizer::{GradientDescent, Optimizer, SGDMomentum, SGD};
-  pub use crate::tensor::Tensor;
-  pub use crate::trainer::{EpochHistory, Trainer, TrainingConfig, TrainingHistory};
+  pub use crate::domain::services::optimizer::{GradientDescent, Optimizer, SGDMomentum, SGD};
+  pub use crate::domain::types::{
+    DataConfig, DataLoader, Dataset, FeatureStats, PreprocessConfig, TaskKind,
+  };
+  pub use crate::domain::{DataRepository, ModelRepository};
+  pub use crate::usecase::train_mlp::{
+    EpochHistory, TrainMLPUsecase, TrainRequest, TrainResponse, Trainer, TrainingConfig,
+    TrainingHistory,
+  };
 }
 
 // Temporary placeholder function for CI setup

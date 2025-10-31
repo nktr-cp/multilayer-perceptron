@@ -4,6 +4,7 @@
 //! It creates synthetic data for binary classification and trains a simple neural network.
 
 use multilayer_perceptron::prelude::*;
+use multilayer_perceptron::usecase::preprocess::build_pipeline;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -155,8 +156,9 @@ fn load_breast_cancer_dataset() -> Result<(Tensor, Tensor, Tensor, Tensor)> {
     random_seed: Some(42), // For reproducible splits
   };
 
-  // Load dataset from CSV
-  let dataset = Dataset::from_csv("./data/data.csv", config)?;
+  // Load dataset from CSV via repository
+  let repo = CsvDataRepository::new("./data/data.csv");
+  let dataset = repo.load_dataset(&config)?;
 
   println!(
     "Loaded {} samples with {} features",
@@ -165,7 +167,15 @@ fn load_breast_cancer_dataset() -> Result<(Tensor, Tensor, Tensor, Tensor)> {
   );
 
   // Split into train and validation sets (80/20 split)
-  let (train_dataset, val_dataset) = dataset.train_test_split(0.2)?;
+  let (mut train_dataset, mut val_dataset) = dataset.train_test_split(0.2)?;
+
+  // Build preprocessing pipeline and apply it consistently
+  let mut pipeline = build_pipeline(&config);
+  if !pipeline.is_empty() {
+    pipeline.fit(&train_dataset)?;
+    pipeline.apply(&mut train_dataset)?;
+    pipeline.apply(&mut val_dataset)?;
+  }
 
   println!("Train set: {} samples", train_dataset.len());
   println!("Validation set: {} samples", val_dataset.len());

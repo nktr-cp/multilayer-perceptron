@@ -1,6 +1,6 @@
-use crate::error::{Result, TensorError};
-use crate::graph::{ComputationGraph, NodeId};
-use crate::ops::OpBuilder;
+use super::error::{Result, TensorError};
+use super::graph::{ComputationGraph, NodeId};
+use super::ops::OpBuilder;
 use ndarray::Array2;
 use rand::{thread_rng, Rng};
 use std::cell::RefCell;
@@ -253,7 +253,7 @@ impl Tensor {
   /// Add operation to computation graph with proper cross-graph handling
   fn add_operation_to_graph(
     graph: Rc<RefCell<ComputationGraph>>,
-    op: crate::ops::OpNode,
+    op: super::ops::OpNode,
     input_ids: Vec<NodeId>,
     result: Tensor,
   ) -> Result<Tensor> {
@@ -267,7 +267,7 @@ impl Tensor {
   }
 
   // Helper method to add operation to computation graph (refactored for readability)
-  fn add_to_graph(&self, other: &Tensor, op: crate::ops::OpNode, result: Tensor) -> Result<Tensor> {
+  fn add_to_graph(&self, other: &Tensor, op: super::ops::OpNode, result: Tensor) -> Result<Tensor> {
     match (self.get_graph_info(), other.get_graph_info()) {
       // Both tensors are tracked
       (Some((self_graph, self_id)), Some((other_graph, other_id))) => {
@@ -305,7 +305,7 @@ impl Tensor {
   }
 
   // Helper method for unary operations
-  fn add_unary_to_graph(&self, op: crate::ops::OpNode, mut result: Tensor) -> Result<Tensor> {
+  fn add_unary_to_graph(&self, op: super::ops::OpNode, mut result: Tensor) -> Result<Tensor> {
     if let (Some(graph_weak), Some(self_id)) = (&self.graph, self.graph_id) {
       if let Some(graph) = graph_weak.upgrade() {
         let output_id = graph
@@ -550,6 +550,9 @@ impl fmt::Debug for Tensor {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::core::graph::ComputationGraph;
+  use std::cell::RefCell;
+  use std::rc::Rc;
 
   #[test]
   fn test_new() {
@@ -712,10 +715,6 @@ mod tests {
 
   #[test]
   fn test_tensor_with_computation_graph() {
-    use crate::graph::ComputationGraph;
-    use std::cell::RefCell;
-    use std::rc::Rc;
-
     let graph = Rc::new(RefCell::new(ComputationGraph::new()));
 
     // Create tracked tensors
@@ -758,10 +757,6 @@ mod tests {
 
   #[test]
   fn test_tensor_graph_integration_with_activation() {
-    use crate::graph::ComputationGraph;
-    use std::cell::RefCell;
-    use std::rc::Rc;
-
     let graph = Rc::new(RefCell::new(ComputationGraph::new()));
 
     // Create a simple neural network computation: output = sigmoid(input * weight + bias)
@@ -807,86 +802,74 @@ mod tests {
       assert!(bias_grad[[0, 0]] != 0.0);
     }
   }
-}
 
-#[test]
-fn test_cross_graph_operation() {
-  use crate::graph::ComputationGraph;
-  use std::cell::RefCell;
-  use std::rc::Rc;
+  #[test]
+  fn test_cross_graph_operation() {
+    let graph_a = Rc::new(RefCell::new(ComputationGraph::new()));
+    let graph_b = Rc::new(RefCell::new(ComputationGraph::new()));
 
-  let graph_a = Rc::new(RefCell::new(ComputationGraph::new()));
-  let graph_b = Rc::new(RefCell::new(ComputationGraph::new()));
+    let mut x = Tensor::ones(2, 2);
+    x.set_requires_grad(true);
+    let x = x.with_graph(graph_a.clone());
 
-  let mut x = Tensor::ones(2, 2);
-  x.set_requires_grad(true);
-  let x = x.with_graph(graph_a.clone());
+    let mut y = Tensor::ones(2, 2);
+    y.set_requires_grad(true);
+    let y = y.with_graph(graph_b.clone());
 
-  let mut y = Tensor::ones(2, 2);
-  y.set_requires_grad(true);
-  let y = y.with_graph(graph_b.clone());
+    // Should merge y into x's graph
+    let z = x.add(&y).unwrap();
 
-  // Should merge y into x's graph
-  let z = x.add(&y).unwrap();
+    // z should be in x's graph
+    assert!(z.is_tracked());
+    assert!(Tensor::same_graph(&x, &z));
 
-  // z should be in x's graph
-  assert!(z.is_tracked());
-  assert!(Tensor::same_graph(&x, &z));
+    // y's original graph should still exist
+    assert_eq!(graph_b.borrow().node_count(), 1); // Only y
 
-  // y's original graph should still exist
-  assert_eq!(graph_b.borrow().node_count(), 1); // Only y
+    // x's graph should have x, y (as leaf), and z
+    assert_eq!(graph_a.borrow().node_count(), 3);
+  }
 
-  // x's graph should have x, y (as leaf), and z
-  assert_eq!(graph_a.borrow().node_count(), 3);
-}
+  #[test]
+  fn test_same_graph_operation() {
+    let graph = Rc::new(RefCell::new(ComputationGraph::new()));
 
-#[test]
-fn test_same_graph_operation() {
-  use crate::graph::ComputationGraph;
-  use std::cell::RefCell;
-  use std::rc::Rc;
+    let mut x = Tensor::ones(2, 2);
+    x.set_requires_grad(true);
+    let x = x.with_graph(graph.clone());
 
-  let graph = Rc::new(RefCell::new(ComputationGraph::new()));
+    let mut y = Tensor::ones(2, 2);
+    y.set_requires_grad(true);
+    let y = y.with_graph(graph.clone());
 
-  let mut x = Tensor::ones(2, 2);
-  x.set_requires_grad(true);
-  let x = x.with_graph(graph.clone());
+    // Should work without merging
+    let z = x.add(&y).unwrap();
 
-  let mut y = Tensor::ones(2, 2);
-  y.set_requires_grad(true);
-  let y = y.with_graph(graph.clone());
+    assert!(z.is_tracked());
+    assert!(Tensor::same_graph(&x, &y));
+    assert!(Tensor::same_graph(&x, &z));
 
-  // Should work without merging
-  let z = x.add(&y).unwrap();
+    // Graph should have x, y, z
+    assert_eq!(graph.borrow().node_count(), 3);
+  }
 
-  assert!(z.is_tracked());
-  assert!(Tensor::same_graph(&x, &y));
-  assert!(Tensor::same_graph(&x, &z));
+  #[test]
+  fn test_untracked_with_tracked() {
+    let graph = Rc::new(RefCell::new(ComputationGraph::new()));
 
-  // Graph should have x, y, z
-  assert_eq!(graph.borrow().node_count(), 3);
-}
+    let mut x = Tensor::ones(2, 2);
+    x.set_requires_grad(true);
+    let x = x.with_graph(graph.clone());
 
-#[test]
-fn test_untracked_with_tracked() {
-  use crate::graph::ComputationGraph;
-  use std::cell::RefCell;
-  use std::rc::Rc;
+    let y = Tensor::ones(2, 2); // Untracked
 
-  let graph = Rc::new(RefCell::new(ComputationGraph::new()));
+    // y should be added to x's graph
+    let z = x.add(&y).unwrap();
 
-  let mut x = Tensor::ones(2, 2);
-  x.set_requires_grad(true);
-  let x = x.with_graph(graph.clone());
+    assert!(z.is_tracked());
+    assert!(Tensor::same_graph(&x, &z));
 
-  let y = Tensor::ones(2, 2); // Untracked
-
-  // y should be added to x's graph
-  let z = x.add(&y).unwrap();
-
-  assert!(z.is_tracked());
-  assert!(Tensor::same_graph(&x, &z));
-
-  // Graph should have x, y (as leaf), z
-  assert_eq!(graph.borrow().node_count(), 3);
+    // Graph should have x, y (as leaf), z
+    assert_eq!(graph.borrow().node_count(), 3);
+  }
 }

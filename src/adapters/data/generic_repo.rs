@@ -3,8 +3,7 @@
 //! This module provides a trait-based approach for handling various data sources
 //! with a unified interface similar to pandas DataFrame functionality.
 
-use crate::error::{Result, TensorError};
-use crate::tensor::Tensor;
+use crate::core::{Result, Tensor, TensorError};
 use ndarray::Array2;
 use std::collections::HashMap;
 use std::fmt::Debug;

@@ -1,5 +1,5 @@
-use crate::error::{Result, TensorError};
-use crate::tensor::Tensor;
+use super::error::{Result, TensorError};
+use super::tensor::Tensor;
 use ndarray::Array2;
 use std::rc::Rc;
 
@@ -443,7 +443,7 @@ impl OpBuilder {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::tensor::Tensor;
+  use crate::core::tensor::Tensor;
   use approx::assert_abs_diff_eq;
   use std::rc::Rc;
 
