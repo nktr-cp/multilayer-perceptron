@@ -82,6 +82,21 @@ impl Tensor {
     }
   }
 
+  pub fn from_scalar(value: f64) -> Result<Self> {
+    Ok(Self {
+      data: Array2::from_elem((1, 1), value),
+      grad: None,
+      requires_grad: false,
+      graph_id: None,
+      graph: None,
+    })
+  }
+
+  pub fn zeros_like(tensor: &Tensor) -> Result<Self> {
+    let shape = tensor.shape();
+    Ok(Self::zeros(shape.0, shape.1))
+  }
+
   pub fn random(rows: usize, cols: usize) -> Self {
     let mut rng = thread_rng();
     let data = Array2::from_shape_fn((rows, cols), |_| rng.gen_range(-1.0..1.0));
