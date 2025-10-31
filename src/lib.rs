@@ -63,7 +63,8 @@ pub mod prelude {
     Activation, DenseLayer, Layer, LayerInfo, ModelSummary, Sequential, WeightInit, MLP,
   };
   pub use crate::domain::services::loss::{
-    BinaryCrossEntropy, CrossEntropy, Loss, MeanSquaredError,
+    BinaryCrossEntropy, CrossEntropy, Loss, MeanSquaredError, RegularizableModel,
+    RegularizationConfig, RegularizedLoss,
   };
   pub use crate::domain::services::metrics::{
     Accuracy, BinaryClassificationMetrics, CategoricalAccuracy, F1Score, MeanSquaredErrorMetric,
