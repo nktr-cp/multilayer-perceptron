@@ -8,7 +8,9 @@ use super::preprocess::build_pipeline;
 use crate::core::{Result, Tensor, TensorError};
 use crate::domain::models::{Activation, Sequential};
 use crate::domain::ports::DataRepository;
-use crate::domain::services::loss::{BinaryCrossEntropy, Loss, MeanSquaredError};
+use crate::domain::services::loss::{
+  BinaryCrossEntropy, Loss, MeanSquaredError, RegularizationConfig,
+};
 use crate::domain::services::metrics::{
   Accuracy, CategoricalAccuracy, F1Score, MeanSquaredErrorMetric, Metric, Precision, Recall,
 };
@@ -39,6 +41,8 @@ pub struct TrainingConfig {
   pub enable_early_stopping: bool,
   /// Base learning rate to apply to the optimizer
   pub learning_rate: f64,
+  /// Optional regularization configuration applied during training
+  pub regularization: Option<RegularizationConfig>,
 }
 
 impl Default for TrainingConfig {
@@ -53,6 +57,7 @@ impl Default for TrainingConfig {
       early_stopping_min_delta: 0.0001,
       enable_early_stopping: true,
       learning_rate: 0.01,
+      regularization: None,
     }
   }
 }
@@ -795,6 +800,10 @@ impl<'a> Trainer<'a> {
   fn update_parameters(&mut self) -> Result<()> {
     // Ensure gradients from the computation graph are available on the parameters
     self.model.sync_gradients()?;
+
+    if let Some(reg_config) = &self.config.regularization {
+      reg_config.add_regularization_gradients(self.model)?;
+    }
 
     let mut params = self.model.parameters_mut();
     self.optimizer.step(params.as_mut_slice())?;

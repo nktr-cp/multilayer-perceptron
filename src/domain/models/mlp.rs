@@ -1,5 +1,6 @@
 use super::layer::{Activation, DenseLayer, Layer, WeightInit};
 use crate::core::{ComputationGraph, Result, Tensor};
+use crate::domain::services::loss::RegularizableModel;
 
 /// Sequential model for building neural networks layer by layer
 ///
@@ -255,6 +256,70 @@ pub struct LayerInfo {
   pub input_shape: (usize, usize),
   pub output_shape: (usize, usize),
   pub param_count: usize,
+}
+
+impl RegularizableModel for Sequential {
+  fn weight_tensors(&self) -> Vec<&Tensor> {
+    let mut weights = Vec::new();
+    for layer in &self.layers {
+      if let Some(dense_layer) = layer.as_any().downcast_ref::<DenseLayer>() {
+        weights.push(dense_layer.weights());
+      }
+    }
+    weights
+  }
+
+  fn bias_tensors(&self) -> Vec<&Tensor> {
+    let mut biases = Vec::new();
+    for layer in &self.layers {
+      if let Some(dense_layer) = layer.as_any().downcast_ref::<DenseLayer>() {
+        biases.push(dense_layer.bias());
+      }
+    }
+    biases
+  }
+
+  fn add_regularization_gradients(&mut self, weight_grads: Vec<Tensor>, bias_grads: Vec<Tensor>) {
+    let mut weight_idx = 0;
+    let mut bias_idx = 0;
+
+    for layer in &mut self.layers {
+      if let Some(dense_layer) = layer.as_any_mut().downcast_mut::<DenseLayer>() {
+        if weight_idx < weight_grads.len() && bias_idx < bias_grads.len() {
+          let accumulate = |param: &mut Tensor, grad: &Tensor| {
+            // Update the parameter's local gradient storage
+            if let Some(existing_grad) = param.grad.as_mut() {
+              *existing_grad = existing_grad.clone() + &grad.data;
+            } else {
+              param.grad = Some(grad.data.clone());
+            }
+
+            // Also update the gradient stored in the computation graph node so that
+            // optimizers reading from the graph see the regularization contribution.
+            if let (Some(graph_weak), Some(node_id)) = (&param.graph, param.graph_id) {
+              if let Some(graph_rc) = graph_weak.upgrade() {
+                let node_rc_opt = { graph_rc.borrow().get_node(node_id) };
+                if let Some(node_rc) = node_rc_opt {
+                  let mut node_ref = node_rc.borrow_mut();
+                  if let Some(existing_graph_grad) = node_ref.tensor.grad.as_mut() {
+                    *existing_graph_grad = existing_graph_grad.clone() + &grad.data;
+                  } else {
+                    node_ref.tensor.grad = Some(grad.data.clone());
+                  }
+                }
+              }
+            }
+          };
+
+          accumulate(dense_layer.weights_mut(), &weight_grads[weight_idx]);
+          accumulate(dense_layer.bias_mut(), &bias_grads[bias_idx]);
+
+          weight_idx += 1;
+          bias_idx += 1;
+        }
+      }
+    }
+  }
 }
 
 /// Summary information about the model

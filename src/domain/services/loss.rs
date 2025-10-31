@@ -545,3 +545,785 @@ mod tests {
     loss_fn.forward(&predictions, &targets).unwrap();
   }
 }
+
+/// Configuration for regularization parameters
+#[derive(Debug, Clone)]
+pub struct RegularizationConfig {
+  /// L1 regularization strength (lambda1)
+  pub l1_lambda: f64,
+  /// L2 regularization strength (lambda2)
+  pub l2_lambda: f64,
+  /// Whether to apply regularization to bias terms
+  pub apply_to_bias: bool,
+}
+
+impl RegularizationConfig {
+  /// Create a new regularization configuration
+  ///
+  /// # Arguments
+  /// * `l1_lambda` - L1 regularization strength (0.0 to disable)
+  /// * `l2_lambda` - L2 regularization strength (0.0 to disable)
+  /// * `apply_to_bias` - Whether to apply regularization to bias terms
+  ///
+  /// # Examples
+  /// ```
+  /// use multilayer_perceptron::prelude::*;
+  ///
+  /// // L2 regularization only
+  /// let config = RegularizationConfig::new(0.0, 0.001, false);
+  ///
+  /// // Elastic Net (L1 + L2)
+  /// let config = RegularizationConfig::new(0.001, 0.001, false);
+  /// ```
+  pub fn new(l1_lambda: f64, l2_lambda: f64, apply_to_bias: bool) -> Self {
+    assert!(l1_lambda >= 0.0, "L1 lambda must be non-negative");
+    assert!(l2_lambda >= 0.0, "L2 lambda must be non-negative");
+
+    Self {
+      l1_lambda,
+      l2_lambda,
+      apply_to_bias,
+    }
+  }
+
+  /// Create L1 regularization only
+  ///
+  /// # Examples
+  /// ```
+  /// use multilayer_perceptron::prelude::*;
+  ///
+  /// let config = RegularizationConfig::l1_only(0.001);
+  /// ```
+  pub fn l1_only(lambda: f64) -> Self {
+    Self::new(lambda, 0.0, false)
+  }
+
+  /// Create L2 regularization only
+  ///
+  /// # Examples
+  /// ```
+  /// use multilayer_perceptron::prelude::*;
+  ///
+  /// let config = RegularizationConfig::l2_only(0.001);
+  /// ```
+  pub fn l2_only(lambda: f64) -> Self {
+    Self::new(0.0, lambda, false)
+  }
+
+  /// Create Elastic Net regularization (L1 + L2)
+  ///
+  /// # Examples
+  /// ```
+  /// use multilayer_perceptron::prelude::*;
+  ///
+  /// let config = RegularizationConfig::elastic_net(0.001, 0.001);
+  /// ```
+  pub fn elastic_net(l1_lambda: f64, l2_lambda: f64) -> Self {
+    Self::new(l1_lambda, l2_lambda, false)
+  }
+
+  /// Check if any regularization is enabled
+  pub fn is_enabled(&self) -> bool {
+    self.l1_lambda > 0.0 || self.l2_lambda > 0.0
+  }
+
+  /// Check if L1 regularization is enabled
+  pub fn has_l1(&self) -> bool {
+    self.l1_lambda > 0.0
+  }
+
+  /// Check if L2 regularization is enabled
+  pub fn has_l2(&self) -> bool {
+    self.l2_lambda > 0.0
+  }
+
+  /// Compute the L1 regularization penalty for the provided parameters.
+  pub(crate) fn compute_l1_regularization(
+    &self,
+    weights: &[&Tensor],
+    biases: &[&Tensor],
+  ) -> Result<Tensor> {
+    if !self.has_l1() {
+      return Ok(Tensor::zeros(1, 1));
+    }
+
+    let mut l1_sum = 0.0;
+
+    // L1 penalty for weights
+    for weight_tensor in weights {
+      for i in 0..weight_tensor.data.nrows() {
+        for j in 0..weight_tensor.data.ncols() {
+          l1_sum += weight_tensor.data[[i, j]].abs();
+        }
+      }
+    }
+
+    // L1 penalty for biases (if enabled)
+    if self.apply_to_bias {
+      for bias_tensor in biases {
+        for i in 0..bias_tensor.data.nrows() {
+          for j in 0..bias_tensor.data.ncols() {
+            l1_sum += bias_tensor.data[[i, j]].abs();
+          }
+        }
+      }
+    }
+
+    let regularization_value = self.l1_lambda * l1_sum;
+    Tensor::from_scalar(regularization_value)
+  }
+
+  /// Compute the L2 regularization penalty for the provided parameters.
+  pub(crate) fn compute_l2_regularization(
+    &self,
+    weights: &[&Tensor],
+    biases: &[&Tensor],
+  ) -> Result<Tensor> {
+    if !self.has_l2() {
+      return Ok(Tensor::zeros(1, 1));
+    }
+
+    let mut l2_sum = 0.0;
+
+    // L2 penalty for weights
+    for weight_tensor in weights {
+      for i in 0..weight_tensor.data.nrows() {
+        for j in 0..weight_tensor.data.ncols() {
+          let w = weight_tensor.data[[i, j]];
+          l2_sum += w * w;
+        }
+      }
+    }
+
+    // L2 penalty for biases (if enabled)
+    if self.apply_to_bias {
+      for bias_tensor in biases {
+        for i in 0..bias_tensor.data.nrows() {
+          for j in 0..bias_tensor.data.ncols() {
+            let b = bias_tensor.data[[i, j]];
+            l2_sum += b * b;
+          }
+        }
+      }
+    }
+
+    let regularization_value = self.l2_lambda * l2_sum;
+    Tensor::from_scalar(regularization_value)
+  }
+
+  /// Compute the L1 regularization gradients for the provided parameters.
+  pub(crate) fn compute_l1_gradient(
+    &self,
+    weights: &[&Tensor],
+    biases: &[&Tensor],
+  ) -> Vec<(Tensor, Tensor)> {
+    if !self.has_l1() {
+      return weights
+        .iter()
+        .zip(biases.iter())
+        .map(|(w, b)| {
+          (
+            Tensor::zeros_like(w).unwrap(),
+            Tensor::zeros_like(b).unwrap(),
+          )
+        })
+        .collect();
+    }
+
+    let mut gradients = Vec::new();
+
+    for (weight_tensor, bias_tensor) in weights.iter().zip(biases.iter()) {
+      // Weight gradients
+      let mut weight_grad_data = weight_tensor.data.clone();
+      for i in 0..weight_grad_data.nrows() {
+        for j in 0..weight_grad_data.ncols() {
+          let w = weight_tensor.data[[i, j]];
+          weight_grad_data[[i, j]] = self.l1_lambda * w.signum();
+        }
+      }
+      let weight_grad = Tensor::from_data(weight_grad_data).unwrap();
+
+      // Bias gradients
+      let bias_grad = if self.apply_to_bias {
+        let mut bias_grad_data = bias_tensor.data.clone();
+        for i in 0..bias_grad_data.nrows() {
+          for j in 0..bias_grad_data.ncols() {
+            let b = bias_tensor.data[[i, j]];
+            bias_grad_data[[i, j]] = self.l1_lambda * b.signum();
+          }
+        }
+        Tensor::from_data(bias_grad_data).unwrap()
+      } else {
+        Tensor::zeros_like(bias_tensor).unwrap()
+      };
+
+      gradients.push((weight_grad, bias_grad));
+    }
+
+    gradients
+  }
+
+  /// Compute the L2 regularization gradients for the provided parameters.
+  pub(crate) fn compute_l2_gradient(
+    &self,
+    weights: &[&Tensor],
+    biases: &[&Tensor],
+  ) -> Vec<(Tensor, Tensor)> {
+    if !self.has_l2() {
+      return weights
+        .iter()
+        .zip(biases.iter())
+        .map(|(w, b)| {
+          (
+            Tensor::zeros_like(w).unwrap(),
+            Tensor::zeros_like(b).unwrap(),
+          )
+        })
+        .collect();
+    }
+
+    let mut gradients = Vec::new();
+
+    for (weight_tensor, bias_tensor) in weights.iter().zip(biases.iter()) {
+      // Weight gradients: 2λ₂ * w
+      let weight_grad = weight_tensor.mul_scalar(2.0 * self.l2_lambda).unwrap();
+
+      // Bias gradients
+      let bias_grad = if self.apply_to_bias {
+        bias_tensor.mul_scalar(2.0 * self.l2_lambda).unwrap()
+      } else {
+        Tensor::zeros_like(bias_tensor).unwrap()
+      };
+
+      gradients.push((weight_grad, bias_grad));
+    }
+
+    gradients
+  }
+
+  /// Compute the total regularization penalty (L1 + L2) for a model.
+  pub(crate) fn compute_regularization_penalty<M: RegularizableModel>(
+    &self,
+    model: &M,
+  ) -> Result<Tensor> {
+    if !self.is_enabled() {
+      return Ok(Tensor::zeros(1, 1));
+    }
+
+    let weights = model.weight_tensors();
+    let biases = model.bias_tensors();
+
+    let l1 = self.compute_l1_regularization(&weights, &biases)?;
+    let l2 = self.compute_l2_regularization(&weights, &biases)?;
+
+    l1.add(&l2)
+  }
+
+  /// Add regularization gradients to the model's parameters.
+  pub(crate) fn add_regularization_gradients<M: RegularizableModel>(
+    &self,
+    model: &mut M,
+  ) -> Result<()> {
+    if !self.is_enabled() {
+      return Ok(());
+    }
+
+    let weights = model.weight_tensors();
+    let biases = model.bias_tensors();
+
+    let l1_grads = self.compute_l1_gradient(&weights, &biases);
+    let l2_grads = self.compute_l2_gradient(&weights, &biases);
+
+    let mut combined_weight_grads = Vec::new();
+    let mut combined_bias_grads = Vec::new();
+
+    for ((l1_w, l1_b), (l2_w, l2_b)) in l1_grads.into_iter().zip(l2_grads.into_iter()) {
+      let combined_w = l1_w.add(&l2_w)?;
+      let combined_b = l1_b.add(&l2_b)?;
+      combined_weight_grads.push(combined_w);
+      combined_bias_grads.push(combined_b);
+    }
+
+    model.add_regularization_gradients(combined_weight_grads, combined_bias_grads);
+
+    Ok(())
+  }
+}
+
+impl Default for RegularizationConfig {
+  fn default() -> Self {
+    Self::new(0.0, 0.0, false)
+  }
+}
+
+/// Regularized Loss Function
+///
+/// This wrapper adds L1 and L2 regularization terms to any base loss function.
+/// It computes the total loss as:
+///
+/// L_total = L_original + R_L1(W) + R_L2(W)
+///
+/// Where:
+/// - L_original is the base loss (e.g., BinaryCrossEntropy, MSE)
+/// - R_L1(W) = λ₁ * Σ|wᵢⱼ| (L1 regularization)
+/// - R_L2(W) = λ₂ * Σwᵢⱼ² (L2 regularization)
+///
+/// # Examples
+/// ```
+/// use multilayer_perceptron::prelude::*;
+///
+/// // L2 regularized binary cross entropy
+/// let base_loss = BinaryCrossEntropy::new();
+/// let config = RegularizationConfig::l2_only(0.001);
+/// let loss_fn = RegularizedLoss::new(base_loss, config);
+/// ```
+#[derive(Debug, Clone)]
+pub struct RegularizedLoss<L: Loss> {
+  /// Base loss function
+  base_loss: L,
+  /// Regularization configuration
+  config: RegularizationConfig,
+}
+
+impl<L: Loss> RegularizedLoss<L> {
+  /// Create a new regularized loss function
+  ///
+  /// # Arguments
+  /// * `base_loss` - The underlying loss function to regularize
+  /// * `config` - Regularization configuration
+  ///
+  /// # Examples
+  /// ```
+  /// use multilayer_perceptron::prelude::*;
+  ///
+  /// let base_loss = BinaryCrossEntropy::new();
+  /// let config = RegularizationConfig::l2_only(0.001);
+  /// let loss_fn = RegularizedLoss::new(base_loss, config);
+  /// ```
+  pub fn new(base_loss: L, config: RegularizationConfig) -> Self {
+    Self { base_loss, config }
+  }
+
+  /// Get reference to the base loss function
+  pub fn base_loss(&self) -> &L {
+    &self.base_loss
+  }
+
+  /// Get reference to the regularization config
+  pub fn config(&self) -> &RegularizationConfig {
+    &self.config
+  }
+}
+
+/// Trait for models that can provide weight parameters for regularization
+pub trait RegularizableModel {
+  /// Get references to weight tensors for regularization
+  fn weight_tensors(&self) -> Vec<&Tensor>;
+
+  /// Get references to bias tensors for regularization  
+  fn bias_tensors(&self) -> Vec<&Tensor>;
+
+  /// Add regularization gradients to the model's parameter gradients
+  fn add_regularization_gradients(&mut self, weight_grads: Vec<Tensor>, bias_grads: Vec<Tensor>);
+}
+
+/// Loss trait implementation for RegularizedLoss - DO NOT USE DIRECTLY
+///
+/// This implementation exists only for trait compatibility but will panic when used.
+/// RegularizedLoss requires model parameters for regularization computation.
+/// Use `compute_loss` and `compute_gradients` methods instead.
+impl<L: Loss> Loss for RegularizedLoss<L> {
+  /// DO NOT USE: Use `compute_loss` method instead
+  fn forward(&self, _predictions: &Tensor, _targets: &Tensor) -> Result<Tensor> {
+    panic!(
+      "RegularizedLoss::forward does not include regularization terms. \
+       Use RegularizedLoss::compute_loss(predictions, targets, model) instead."
+    );
+  }
+
+  /// DO NOT USE: Use `compute_gradients` method instead  
+  fn backward(&self, _predictions: &Tensor, _targets: &Tensor) -> Result<Tensor> {
+    panic!(
+      "RegularizedLoss::backward does not include regularization gradients. \
+       Use RegularizedLoss::compute_gradients(predictions, targets, model) instead."
+    );
+  }
+
+  fn name(&self) -> &'static str {
+    "RegularizedLoss"
+  }
+}
+
+impl<L: Loss> RegularizedLoss<L> {
+  /// Forward pass with regularization terms
+  /// Compute the total regularized loss including L1/L2 penalties
+  ///
+  /// This computes the total loss including regularization:
+  /// L_total = L_base + R_L1 + R_L2
+  ///
+  /// # Arguments
+  /// * `predictions` - Model predictions
+  /// * `targets` - Target values
+  /// * `model` - Model implementing RegularizableModel for parameter access
+  ///
+  /// # Returns
+  /// Total loss including base loss and regularization terms
+  pub fn compute_loss<M: RegularizableModel>(
+    &self,
+    predictions: &Tensor,
+    targets: &Tensor,
+    model: &M,
+  ) -> Result<Tensor> {
+    // Compute base loss
+    let base_loss = self.base_loss.forward(predictions, targets)?;
+
+    if !self.config.is_enabled() {
+      return Ok(base_loss);
+    }
+
+    let penalty = self.config.compute_regularization_penalty(model)?;
+    base_loss.add(&penalty)
+  }
+
+  /// Add regularization gradients to the model's existing parameter gradients
+  ///
+  /// This assumes that the base loss gradients have already been computed
+  /// and are present in the model's parameter gradients. This method adds
+  /// the regularization gradients on top of the existing gradients.
+  ///
+  /// # Arguments
+  /// * `model` - Mutable model to add regularization gradients to
+  ///
+  /// # Returns
+  /// Empty tensor (regularization doesn't contribute to prediction gradients)
+  pub fn compute_gradients<M: RegularizableModel>(
+    &self,
+    model: &mut M,
+  ) -> Result<Tensor> {
+    if !self.config.is_enabled() {
+      return Ok(Tensor::zeros(1, 1));
+    }
+
+    self.config.add_regularization_gradients(model)?;
+
+    Ok(Tensor::zeros(1, 1))
+  }
+}
+
+#[cfg(test)]
+mod regularization_tests {
+  use super::*;
+
+  use approx::assert_abs_diff_eq;
+
+  /// Mock model for testing regularization
+  struct MockModel {
+    weights: Vec<Tensor>,
+    biases: Vec<Tensor>,
+  }
+
+  impl MockModel {
+    fn new() -> Self {
+      let weight1 = Tensor::new(vec![vec![2.0, -1.0], vec![3.0, -2.0]]).unwrap(); // 2x2
+      let bias1 = Tensor::new(vec![vec![0.5, -0.5]]).unwrap(); // 1x2
+      let weight2 = Tensor::new(vec![vec![1.0], vec![-1.0]]).unwrap(); // 2x1
+      let bias2 = Tensor::new(vec![vec![0.1]]).unwrap(); // 1x1
+
+      Self {
+        weights: vec![weight1, weight2],
+        biases: vec![bias1, bias2],
+      }
+    }
+  }
+
+  impl RegularizableModel for MockModel {
+    fn weight_tensors(&self) -> Vec<&Tensor> {
+      self.weights.iter().collect()
+    }
+
+    fn bias_tensors(&self) -> Vec<&Tensor> {
+      self.biases.iter().collect()
+    }
+
+    fn add_regularization_gradients(&mut self, weight_grads: Vec<Tensor>, bias_grads: Vec<Tensor>) {
+      // Mock implementation - just store gradients
+      for (i, weight_grad) in weight_grads.into_iter().enumerate() {
+        if i < self.weights.len() {
+          self.weights[i].grad = Some(weight_grad.data);
+        }
+      }
+      for (i, bias_grad) in bias_grads.into_iter().enumerate() {
+        if i < self.biases.len() {
+          self.biases[i].grad = Some(bias_grad.data);
+        }
+      }
+    }
+  }
+
+  #[test]
+  fn test_regularization_config_creation() {
+    let config = RegularizationConfig::new(0.01, 0.02, true);
+    assert_eq!(config.l1_lambda, 0.01);
+    assert_eq!(config.l2_lambda, 0.02);
+    assert!(config.apply_to_bias);
+    assert!(config.is_enabled());
+    assert!(config.has_l1());
+    assert!(config.has_l2());
+
+    let l1_only = RegularizationConfig::l1_only(0.01);
+    assert_eq!(l1_only.l1_lambda, 0.01);
+    assert_eq!(l1_only.l2_lambda, 0.0);
+    assert!(!l1_only.apply_to_bias);
+    assert!(l1_only.has_l1());
+    assert!(!l1_only.has_l2());
+
+    let l2_only = RegularizationConfig::l2_only(0.02);
+    assert_eq!(l2_only.l1_lambda, 0.0);
+    assert_eq!(l2_only.l2_lambda, 0.02);
+    assert!(!l2_only.has_l1());
+    assert!(l2_only.has_l2());
+
+    let elastic_net = RegularizationConfig::elastic_net(0.01, 0.02);
+    assert_eq!(elastic_net.l1_lambda, 0.01);
+    assert_eq!(elastic_net.l2_lambda, 0.02);
+    assert!(elastic_net.has_l1());
+    assert!(elastic_net.has_l2());
+  }
+
+  #[test]
+  #[should_panic(expected = "L1 lambda must be non-negative")]
+  fn test_regularization_config_negative_l1() {
+    RegularizationConfig::new(-0.01, 0.02, false);
+  }
+
+  #[test]
+  #[should_panic(expected = "L2 lambda must be non-negative")]
+  fn test_regularization_config_negative_l2() {
+    RegularizationConfig::new(0.01, -0.02, false);
+  }
+
+  #[test]
+  fn test_regularized_loss_creation() {
+    let base_loss = BinaryCrossEntropy::new();
+    let config = RegularizationConfig::l2_only(0.001);
+    let reg_loss = RegularizedLoss::new(base_loss, config);
+
+    assert_eq!(reg_loss.name(), "RegularizedLoss");
+    assert_eq!(reg_loss.base_loss().name(), "BinaryCrossEntropy");
+    assert!(reg_loss.config().has_l2());
+    assert!(!reg_loss.config().has_l1());
+  }
+
+  #[test]
+  fn test_l1_regularization_computation() {
+    let base_loss = BinaryCrossEntropy::new();
+    let config = RegularizationConfig::l1_only(0.1);
+    let reg_loss = RegularizedLoss::new(base_loss, config);
+
+    let model = MockModel::new();
+    let weights = model.weight_tensors();
+    let biases = model.bias_tensors();
+
+    let l1_reg = reg_loss
+      .config()
+      .compute_l1_regularization(&weights, &biases)
+      .unwrap();
+
+    // Expected L1 = 0.1 * (|2| + |-1| + |3| + |-2| + |1| + |-1|) = 0.1 * 10 = 1.0
+    assert_abs_diff_eq!(l1_reg.data[[0, 0]], 1.0, epsilon = 1e-6);
+  }
+
+  #[test]
+  fn test_l2_regularization_computation() {
+    let base_loss = BinaryCrossEntropy::new();
+    let config = RegularizationConfig::l2_only(0.1);
+    let reg_loss = RegularizedLoss::new(base_loss, config);
+
+    let model = MockModel::new();
+    let weights = model.weight_tensors();
+    let biases = model.bias_tensors();
+
+    let l2_reg = reg_loss
+      .config()
+      .compute_l2_regularization(&weights, &biases)
+      .unwrap();
+
+    // Expected L2 = 0.1 * (2² + (-1)² + 3² + (-2)² + 1² + (-1)²) = 0.1 * (4 + 1 + 9 + 4 + 1 + 1) = 0.1 * 20 = 2.0
+    assert_abs_diff_eq!(l2_reg.data[[0, 0]], 2.0, epsilon = 1e-6);
+  }
+
+  #[test]
+  fn test_l1_regularization_with_bias() {
+    let base_loss = BinaryCrossEntropy::new();
+    let config = RegularizationConfig::new(0.1, 0.0, true); // L1 with bias
+    let reg_loss = RegularizedLoss::new(base_loss, config);
+
+    let model = MockModel::new();
+    let weights = model.weight_tensors();
+    let biases = model.bias_tensors();
+
+    let l1_reg = reg_loss
+      .config()
+      .compute_l1_regularization(&weights, &biases)
+      .unwrap();
+
+    // Expected L1 = 0.1 * (|2| + |-1| + |3| + |-2| + |1| + |-1| + |0.5| + |-0.5| + |0.1|)
+    //              = 0.1 * (2 + 1 + 3 + 2 + 1 + 1 + 0.5 + 0.5 + 0.1) = 0.1 * 11.1 = 1.11
+    assert_abs_diff_eq!(l1_reg.data[[0, 0]], 1.11, epsilon = 1e-6);
+  }
+
+  #[test]
+  fn test_elastic_net_regularization() {
+    let base_loss = BinaryCrossEntropy::new();
+    let config = RegularizationConfig::elastic_net(0.05, 0.05);
+    let reg_loss = RegularizedLoss::new(base_loss, config);
+
+    let model = MockModel::new();
+    let weights = model.weight_tensors();
+    let biases = model.bias_tensors();
+
+    let l1_reg = reg_loss
+      .config()
+      .compute_l1_regularization(&weights, &biases)
+      .unwrap();
+    let l2_reg = reg_loss
+      .config()
+      .compute_l2_regularization(&weights, &biases)
+      .unwrap();
+
+    // L1 = 0.05 * 10 = 0.5, L2 = 0.05 * 20 = 1.0
+    assert_abs_diff_eq!(l1_reg.data[[0, 0]], 0.5, epsilon = 1e-6);
+    assert_abs_diff_eq!(l2_reg.data[[0, 0]], 1.0, epsilon = 1e-6);
+  }
+
+  #[test]
+  fn test_regularized_loss_compute_loss() {
+    let base_loss = BinaryCrossEntropy::new();
+    let config = RegularizationConfig::l2_only(0.1);
+    let reg_loss = RegularizedLoss::new(base_loss, config);
+
+    let model = MockModel::new();
+
+    // Create mock predictions and targets
+    let predictions = Tensor::new(vec![vec![0.8, 0.3]]).unwrap();
+    let targets = Tensor::new(vec![vec![1.0, 0.0]]).unwrap();
+
+    let total_loss = reg_loss
+      .compute_loss(&predictions, &targets, &model)
+      .unwrap();
+
+    // Should be base loss + regularization term
+    let base_only_loss = reg_loss
+      .base_loss()
+      .forward(&predictions, &targets)
+      .unwrap();
+    assert!(total_loss.data[[0, 0]] > base_only_loss.data[[0, 0]]);
+  }
+
+  #[test]
+  fn test_l1_gradient_computation() {
+    let base_loss = BinaryCrossEntropy::new();
+    let config = RegularizationConfig::l1_only(0.1);
+    let reg_loss = RegularizedLoss::new(base_loss, config);
+
+    let model = MockModel::new();
+    let weights = model.weight_tensors();
+    let biases = model.bias_tensors();
+
+    let l1_grads = reg_loss.config().compute_l1_gradient(&weights, &biases);
+
+    // First weight matrix: [[2.0, -1.0], [3.0, -2.0]]
+    // L1 gradient = 0.1 * sign(w) = [[0.1, -0.1], [0.1, -0.1]]
+    assert_eq!(l1_grads.len(), 2);
+    assert_abs_diff_eq!(l1_grads[0].0.data[[0, 0]], 0.1, epsilon = 1e-6);
+    assert_abs_diff_eq!(l1_grads[0].0.data[[0, 1]], -0.1, epsilon = 1e-6);
+    assert_abs_diff_eq!(l1_grads[0].0.data[[1, 0]], 0.1, epsilon = 1e-6);
+    assert_abs_diff_eq!(l1_grads[0].0.data[[1, 1]], -0.1, epsilon = 1e-6);
+
+    // Second weight matrix: [[1.0], [-1.0]]
+    // L1 gradient = 0.1 * sign(w) = [[0.1], [-0.1]]
+    assert_abs_diff_eq!(l1_grads[1].0.data[[0, 0]], 0.1, epsilon = 1e-6);
+    assert_abs_diff_eq!(l1_grads[1].0.data[[1, 0]], -0.1, epsilon = 1e-6);
+  }
+
+  #[test]
+  fn test_l2_gradient_computation() {
+    let base_loss = BinaryCrossEntropy::new();
+    let config = RegularizationConfig::l2_only(0.1);
+    let reg_loss = RegularizedLoss::new(base_loss, config);
+
+    let model = MockModel::new();
+    let weights = model.weight_tensors();
+    let biases = model.bias_tensors();
+
+    let l2_grads = reg_loss.config().compute_l2_gradient(&weights, &biases);
+
+    // First weight matrix: [[2.0, -1.0], [3.0, -2.0]]
+    // L2 gradient = 2 * 0.1 * w = [[0.4, -0.2], [0.6, -0.4]]
+    assert_eq!(l2_grads.len(), 2);
+    assert_abs_diff_eq!(l2_grads[0].0.data[[0, 0]], 0.4, epsilon = 1e-6);
+    assert_abs_diff_eq!(l2_grads[0].0.data[[0, 1]], -0.2, epsilon = 1e-6);
+    assert_abs_diff_eq!(l2_grads[0].0.data[[1, 0]], 0.6, epsilon = 1e-6);
+    assert_abs_diff_eq!(l2_grads[0].0.data[[1, 1]], -0.4, epsilon = 1e-6);
+
+    // Second weight matrix: [[1.0], [-1.0]]
+    // L2 gradient = 2 * 0.1 * w = [[0.2], [-0.2]]
+    assert_abs_diff_eq!(l2_grads[1].0.data[[0, 0]], 0.2, epsilon = 1e-6);
+    assert_abs_diff_eq!(l2_grads[1].0.data[[1, 0]], -0.2, epsilon = 1e-6);
+  }
+
+  #[test]
+  fn test_regularized_loss_no_regularization() {
+    let base_loss = BinaryCrossEntropy::new();
+    let config = RegularizationConfig::new(0.0, 0.0, false);
+    let reg_loss = RegularizedLoss::new(base_loss, config);
+
+    let model = MockModel::new();
+
+    let predictions = Tensor::new(vec![vec![0.8, 0.3]]).unwrap();
+    let targets = Tensor::new(vec![vec![1.0, 0.0]]).unwrap();
+
+    let total_loss = reg_loss
+      .compute_loss(&predictions, &targets, &model)
+      .unwrap();
+    let base_only_loss = reg_loss
+      .base_loss()
+      .forward(&predictions, &targets)
+      .unwrap();
+
+    // Should be identical when no regularization
+    assert_abs_diff_eq!(
+      total_loss.data[[0, 0]],
+      base_only_loss.data[[0, 0]],
+      epsilon = 1e-10
+    );
+  }
+
+  #[test]
+  #[should_panic(expected = "RegularizedLoss::forward does not include regularization terms")]
+  fn test_regularized_loss_forward_panics() {
+    let base_loss = BinaryCrossEntropy::new();
+    let config = RegularizationConfig::l2_only(0.1);
+    let reg_loss = RegularizedLoss::new(base_loss, config);
+
+    let predictions = Tensor::new(vec![vec![0.8, 0.3]]).unwrap();
+    let targets = Tensor::new(vec![vec![1.0, 0.0]]).unwrap();
+
+    // This should panic
+    let _ = reg_loss.forward(&predictions, &targets);
+  }
+
+  #[test]
+  #[should_panic(expected = "RegularizedLoss::backward does not include regularization gradients")]
+  fn test_regularized_loss_backward_panics() {
+    let base_loss = BinaryCrossEntropy::new();
+    let config = RegularizationConfig::l2_only(0.1);
+    let reg_loss = RegularizedLoss::new(base_loss, config);
+
+    let predictions = Tensor::new(vec![vec![0.8, 0.3]]).unwrap();
+    let targets = Tensor::new(vec![vec![1.0, 0.0]]).unwrap();
+
+    // This should panic
+    let _ = reg_loss.backward(&predictions, &targets);
+  }
+}

@@ -72,6 +72,7 @@ let data_config = DataConfig::default();
 let training_config = TrainingConfig {
     epochs: 100,
     batch_size: 32,
+    regularization: None,
     ..Default::default()
 };
 
