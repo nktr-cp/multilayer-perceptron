@@ -155,8 +155,9 @@ fn load_breast_cancer_dataset() -> Result<(Tensor, Tensor, Tensor, Tensor)> {
     random_seed: Some(42), // For reproducible splits
   };
 
-  // Load dataset from CSV
-  let dataset = Dataset::from_csv("./data/data.csv", config)?;
+  // Load dataset from CSV via repository
+  let repo = CsvDataRepository::new("./data/data.csv");
+  let dataset = repo.load_dataset(&config)?;
 
   println!(
     "Loaded {} samples with {} features",
