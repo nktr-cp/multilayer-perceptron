@@ -8,11 +8,17 @@ interface NetworkVisualizerProps {
   layers: number[]
   isTraining: boolean
   activationFn: string
+  weights?: number[][][] | null
 }
 
-export function NetworkVisualizer({ layers, isTraining, activationFn }: NetworkVisualizerProps) {
+export function NetworkVisualizer({ layers, isTraining, activationFn, weights }: NetworkVisualizerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const [weights, setWeights] = useState<number[][][]>([])
+  const [visualWeights, setVisualWeights] = useState<number[][][]>([])
+  const weightsRef = useRef<number[][][]>(visualWeights)
+
+  useEffect(() => {
+    weightsRef.current = visualWeights
+  }, [visualWeights])
 
   useEffect(() => {
     // Initialize random weights
@@ -28,8 +34,13 @@ export function NetworkVisualizer({ layers, isTraining, activationFn }: NetworkV
       }
       newWeights.push(layerWeights)
     }
-    setWeights(newWeights)
+    setVisualWeights(newWeights)
   }, [layers])
+
+  useEffect(() => {
+    if (!weights || weights.length === 0) return
+    setVisualWeights(weights)
+  }, [weights])
 
   useEffect(() => {
     if (!canvasRef.current) return
@@ -65,7 +76,7 @@ export function NetworkVisualizer({ layers, isTraining, activationFn }: NetworkV
           for (let k = 0; k < nextLayerSize; k++) {
             const nextY = topPadding + (availableHeight / (nextLayerSize + 1)) * (k + 1)
 
-            const weight = weights[i]?.[j]?.[k] || 0
+            const weight = weightsRef.current[i]?.[j]?.[k] ?? 0
             const opacity = Math.abs(weight) * 0.5 + 0.1
             const hue = weight > 0 ? 195 : 320 // cyan for positive, magenta for negative
 
@@ -124,15 +135,17 @@ export function NetworkVisualizer({ layers, isTraining, activationFn }: NetworkV
       draw()
       if (isTraining) {
         // Simulate weight updates
-        setWeights((prev) =>
-          prev.map((layer) => layer.map((neuron) => neuron.map((w) => w + (Math.random() - 0.5) * 0.01))),
-        )
+        if (!weights || weights.length === 0) {
+          setVisualWeights((prev) =>
+            prev.map((layer) => layer.map((neuron) => neuron.map((w) => w + (Math.random() - 0.5) * 0.01))),
+          )
+        }
       }
       requestAnimationFrame(animate)
     }
 
     animate()
-  }, [layers, weights, isTraining])
+  }, [layers, isTraining, weights])
 
   return (
     <Card className="glass-card glow-cyan p-6 h-[550px]">
@@ -143,16 +156,34 @@ export function NetworkVisualizer({ layers, isTraining, activationFn }: NetworkV
             {layers.join(" → ")} neurons • {activationFn.toUpperCase()}
           </p>
         </div>
-        {isTraining && (
-          <motion.div
-            animate={{ opacity: [0.5, 1, 0.5] }}
-            transition={{ duration: 1.5, repeat: Number.POSITIVE_INFINITY }}
-            className="flex items-center gap-2"
-          >
-            <div className="w-2 h-2 rounded-full bg-accent" />
-            <span className="text-sm text-accent">Training</span>
-          </motion.div>
-        )}
+        <div className="flex items-center gap-6">
+          {/* Color Legend */}
+          <div className="flex flex-col gap-1 text-xs">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full border" style={{ background: 'oklch(0.7 0.25 195)', border: '1px solid oklch(0.9 0.25 195 / 0.5)' }} />
+              <span className="text-muted-foreground">Neurons</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-0.5" style={{ background: 'oklch(0.7 0.25 195 / 0.6)' }} />
+              <span className="text-muted-foreground">Positive weights</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-0.5" style={{ background: 'oklch(0.7 0.25 320 / 0.6)' }} />
+              <span className="text-muted-foreground">Negative weights</span>
+            </div>
+          </div>
+          
+          {isTraining && (
+            <motion.div
+              animate={{ opacity: [0.5, 1, 0.5] }}
+              transition={{ duration: 1.5, repeat: Number.POSITIVE_INFINITY }}
+              className="flex items-center gap-2"
+            >
+              <div className="w-2 h-2 rounded-full bg-accent" />
+              <span className="text-sm text-accent">Training</span>
+            </motion.div>
+          )}
+        </div>
       </div>
 
       <canvas ref={canvasRef} width={800} height={450} className="w-full h-full" />

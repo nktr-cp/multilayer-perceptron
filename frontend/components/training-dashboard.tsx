@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
+import { Switch } from "@/components/ui/switch"
 import { Play, RotateCcw } from "lucide-react"
 import { Line } from "react-chartjs-2"
 import {
@@ -39,7 +40,14 @@ interface TrainingDashboardProps {
     f1Score?: number
     mse?: number
   } | null
-  onStartTraining: (config: { epochs: number; batchSize: number; validationSplit: number }) => void
+  onStartTraining: (config: { 
+    epochs: number; 
+    batchSize: number; 
+    validationSplit: number;
+    enableEarlyStopping: boolean;
+    earlyStoppingPatience: number;
+    earlyStoppingMinDelta: number;
+  }) => void
   onReset: () => void
   error?: string | null
 }
@@ -56,6 +64,9 @@ export function TrainingDashboard({
   const [epochs, setEpochs] = useState(100)
   const [batchSize, setBatchSize] = useState(32)
   const [validationSplit, setValidationSplit] = useState(0.2)
+  const [enableEarlyStopping, setEnableEarlyStopping] = useState(false)
+  const [earlyStoppingPatience, setEarlyStoppingPatience] = useState(20)
+  const [earlyStoppingMinDelta, setEarlyStoppingMinDelta] = useState(0.05)
 
   const currentEpoch = history?.loss.length ?? 0
   const latestLoss = history?.loss.at(-1) ?? 0
@@ -180,6 +191,46 @@ export function TrainingDashboard({
             step={5}
           />
         </div>
+        
+        {/* Early Stopping Configuration */}
+        <div className="space-y-4 border-t pt-4">
+          <div className="flex items-center justify-between">
+            <Label className="text-sm text-muted-foreground">Early Stopping</Label>
+            <Switch
+              checked={enableEarlyStopping}
+              onCheckedChange={setEnableEarlyStopping}
+            />
+          </div>
+          
+          {enableEarlyStopping && (
+            <>
+              <div className="space-y-2">
+                <Label className="text-sm text-muted-foreground">Patience (epochs)</Label>
+                <Input
+                  type="number"
+                  value={earlyStoppingPatience}
+                  onChange={(event) => setEarlyStoppingPatience(Math.max(1, Number.parseInt(event.target.value) || 20))}
+                  min={1}
+                  max={100}
+                  placeholder="20"
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label className="text-sm text-muted-foreground">Min Delta</Label>
+                <Input
+                  type="number"
+                  value={earlyStoppingMinDelta}
+                  onChange={(event) => setEarlyStoppingMinDelta(Math.max(0, Number.parseFloat(event.target.value) || 0.05))}
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  placeholder="0.05"
+                />
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       {metrics && (
@@ -249,7 +300,14 @@ export function TrainingDashboard({
 
       <div className="flex gap-2">
         <Button
-          onClick={() => onStartTraining({ epochs, batchSize, validationSplit })}
+          onClick={() => onStartTraining({ 
+            epochs, 
+            batchSize, 
+            validationSplit, 
+            enableEarlyStopping, 
+            earlyStoppingPatience, 
+            earlyStoppingMinDelta 
+          })}
           className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground"
           disabled={!canTrain || isTraining}
         >
@@ -262,6 +320,9 @@ export function TrainingDashboard({
             setEpochs(100)
             setBatchSize(32)
             setValidationSplit(0.2)
+            setEnableEarlyStopping(false)
+            setEarlyStoppingPatience(5)
+            setEarlyStoppingMinDelta(0.001)
           }}
           variant="outline"
           className="border-border/50 hover:bg-muted/50 bg-transparent"

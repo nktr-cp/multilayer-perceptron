@@ -92,7 +92,9 @@ export function useMLTraining(wasmModule: WasmModule | null) {
       setIsTraining(true)
       setError(null)
       setHasModel(false)
-      appendLogs([`> Starting training for ${options.epochs} epochs`])
+      appendLogs([
+        `> Starting training for ${options.epochs} epochs`,
+      ])
 
       try {
         const sanitizedLayers = options.layers.length >= 2 ? [...options.layers] : [options.layers[0] || 2, 1]
@@ -155,13 +157,24 @@ export function useMLTraining(wasmModule: WasmModule | null) {
                 options.regularization.l2,
               )
 
-        const trainingConfig = new wasmModule.JsTrainingConfig(
-          Math.max(1, Math.floor(options.epochs)),
-          Math.max(1, Math.floor(options.batchSize)),
-          Math.min(Math.max(options.validationSplit, 0), 0.9),
-          optimizerConfig,
-          regularizationConfig,
-        )
+        const trainingConfig = options.enableEarlyStopping
+          ? (wasmModule as any).JsTrainingConfig.newWithEarlyStopping(
+              Math.max(1, Math.floor(options.epochs)),
+              Math.max(1, Math.floor(options.batchSize)),
+              Math.min(Math.max(options.validationSplit, 0.1), 0.9), // Early stopping requires validation data
+              optimizerConfig,
+              regularizationConfig,
+              options.enableEarlyStopping,
+              options.earlyStoppingPatience || 5,
+              options.earlyStoppingMinDelta || 0.001,
+            )
+          : new wasmModule.JsTrainingConfig(
+              Math.max(1, Math.floor(options.epochs)),
+              Math.max(1, Math.floor(options.batchSize)),
+              Math.min(Math.max(options.validationSplit, 0), 0.9),
+              optimizerConfig,
+              regularizationConfig,
+            )
 
         const modelConfig = new wasmModule.JsModelConfig(
           sanitizedLayers,
@@ -188,16 +201,21 @@ export function useMLTraining(wasmModule: WasmModule | null) {
 
         const finalMetrics = (result as any).final_metrics
         setMetrics({
-          loss: finalMetrics.loss(),
-          accuracy: finalMetrics.accuracy(),
-          precision: finalMetrics.precision(),
-          recall: finalMetrics.recall(),
-          f1Score: finalMetrics.f1_score(),
-          mse: finalMetrics.mse(),
+          loss: finalMetrics.loss || 0,
+          accuracy: finalMetrics.accuracy,
+          precision: finalMetrics.precision,
+          recall: finalMetrics.recall,
+          f1Score: finalMetrics.f1_score,
+          mse: finalMetrics.mse,
         })
 
-        const weightSnapshot = (trainer as any).weight_matrices?.()
-        setWeights(weightSnapshot ? toNestedNumberArray(weightSnapshot) : null)
+        try {
+          const weightSnapshot = (trainer as any).weight_matrices ? (trainer as any).weight_matrices() : null
+          setWeights(weightSnapshot ? toNestedNumberArray(weightSnapshot) : null)
+        } catch (error) {
+          console.log("Could not retrieve weights:", error)
+          setWeights(null)
+        }
 
         const epochLogs = lossHistory.map((loss, index) => {
           const acc = accuracyHistory[index]
