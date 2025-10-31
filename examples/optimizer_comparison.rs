@@ -143,8 +143,8 @@ fn run_experiment(setup: &OptimizerSetup, data: &DatasetBundle) -> Result<Optimi
 
   let mut trainer = Trainer::new_boxed(&mut model, loss_fn, optimizer);
   trainer = trainer.with_config(config);
-  trainer = trainer.with_train_metric(MeanSquaredErrorMetric::default());
-  trainer = trainer.with_val_metric(MeanSquaredErrorMetric::default());
+  trainer = trainer.with_train_metric(MeanSquaredErrorMetric);
+  trainer = trainer.with_val_metric(MeanSquaredErrorMetric);
 
   let history_ref = trainer.fit(&train_x, &train_y, Some(&val_x), Some(&val_y))?;
   let history = history_ref.clone();
