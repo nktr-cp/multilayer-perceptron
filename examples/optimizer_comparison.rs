@@ -136,6 +136,8 @@ fn run_experiment(setup: &OptimizerSetup, data: &DatasetBundle) -> Result<Optimi
     enable_early_stopping: true,
     learning_rate: setup.learning_rate,
     regularization: None,
+    #[cfg(not(target_arch = "wasm32"))]
+    show_gui_plots: false,
   };
 
   let loss_fn: Box<dyn Loss> = Box::new(MeanSquaredError::new());

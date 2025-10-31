@@ -129,8 +129,8 @@ This project is configured for automatic deployment to GitHub Pages:
 
 3. **Local Testing**:
    ```bash
-   make deploy-local       # Test the GitHub Pages build locally
-   ```
+make deploy-local       # Test the GitHub Pages build locally
+```
 
 ### Build Optimization
 
@@ -140,6 +140,24 @@ The build process includes several optimizations for WebAssembly:
 - **WASM Optimization**: Applies `wasm-opt -Os` for further size reduction
 - **Code Splitting**: Webpack splits vendor libraries and WebAssembly modules
 - **Minification**: HTML, CSS, and JavaScript are minified in production builds
+
+## 🖥️ Native Learning Curve Visualizer
+
+Run the training demos locally to open an egui-powered window that plots loss and custom metrics as the model trains.
+
+### Requirements
+
+- Desktop build (Linux, macOS, or Windows) with an active display
+- Cargo dependencies fetch `eframe` and `egui_plot` automatically; no extra setup needed
+
+### Usage
+
+```bash
+# Enable the GUI for the interactive training demo
+SHOW_GUI_PLOTS=1 cargo run --example training_demo
+```
+
+Close each window or stop the process to finish the demo stages. If `SHOW_GUI_PLOTS` is unset or `0`, training falls back to terminal output only. The visualization feature is ignored automatically when targeting `wasm32`.
 
 ## 🏗️ Project Structure
 
