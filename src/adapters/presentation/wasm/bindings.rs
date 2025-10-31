@@ -6,12 +6,411 @@
 use crate::prelude::*;
 use js_sys::Float64Array;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::console;
 
 type JsResult<T> = std::result::Result<T, JsValue>;
+
+/// Log helper functions for WASM environment
+fn log_info(message: &str) {
+  console::log_1(&JsValue::from_str(message));
+}
+
+fn log_error(message: &str) {
+  console::error_1(&JsValue::from_str(message));
+}
+
+fn log_debug(message: &str) {
+  console::debug_1(&JsValue::from_str(message));
+}
+
+#[wasm_bindgen]
+#[derive(Debug, Clone, Copy)]
+pub enum JsOptimizerType {
+  GD,
+  SGD,
+  SGDMomentum,
+  RMSProp,
+  Adam,
+}
+
+#[derive(Debug, Clone)]
+struct OptimizerConfigData {
+  optimizer_type: JsOptimizerType,
+  learning_rate: f64,
+}
+
+impl OptimizerConfigData {
+  fn ensure_valid(&self) -> JsResult<()> {
+    if self.learning_rate <= 0.0 {
+      return Err(JsValue::from_str("Learning rate must be positive"));
+    }
+    Ok(())
+  }
+
+  fn build_optimizer(&self) -> Box<dyn Optimizer> {
+    match self.optimizer_type {
+      JsOptimizerType::GD => Box::new(GradientDescent::new(self.learning_rate)),
+      JsOptimizerType::SGD => Box::new(SGD::new(self.learning_rate)),
+      JsOptimizerType::SGDMomentum => Box::new(SGDMomentum::new(self.learning_rate, 0.9)),
+      JsOptimizerType::RMSProp => Box::new(RMSProp::new(self.learning_rate)),
+      JsOptimizerType::Adam => Box::new(Adam::new(self.learning_rate)),
+    }
+  }
+}
+
+#[wasm_bindgen]
+#[derive(Debug)]
+pub struct JsOptimizerConfig {
+  inner: OptimizerConfigData,
+}
+
+impl Clone for JsOptimizerConfig {
+  fn clone(&self) -> Self {
+    Self {
+      inner: self.inner.clone(),
+    }
+  }
+}
+
+#[wasm_bindgen]
+impl JsOptimizerConfig {
+  #[wasm_bindgen(constructor)]
+  pub fn new(optimizer_type: JsOptimizerType, learning_rate: f64) -> JsResult<JsOptimizerConfig> {
+    let config = OptimizerConfigData {
+      optimizer_type,
+      learning_rate,
+    };
+    config.ensure_valid()?;
+    Ok(Self { inner: config })
+  }
+
+  #[wasm_bindgen(getter)]
+  pub fn optimizer_type(&self) -> JsOptimizerType {
+    self.inner.optimizer_type
+  }
+
+  #[wasm_bindgen(getter)]
+  pub fn learning_rate(&self) -> f64 {
+    self.inner.learning_rate
+  }
+
+  pub(crate) fn inner(&self) -> &OptimizerConfigData {
+    &self.inner
+  }
+}
+
+#[wasm_bindgen]
+#[derive(Debug, Clone, Copy)]
+pub enum JsRegularizationType {
+  None,
+  L1,
+  L2,
+  ElasticNet,
+}
+
+#[derive(Debug, Clone)]
+struct RegularizationConfigData {
+  regularization_type: JsRegularizationType,
+  l1_lambda: f64,
+  l2_lambda: f64,
+}
+
+impl RegularizationConfigData {
+  fn ensure_valid(&self) -> JsResult<()> {
+    if self.l1_lambda < 0.0 {
+      return Err(JsValue::from_str("L1 lambda must be non-negative"));
+    }
+    if self.l2_lambda < 0.0 {
+      return Err(JsValue::from_str("L2 lambda must be non-negative"));
+    }
+    Ok(())
+  }
+
+  fn to_domain(&self) -> Option<RegularizationConfig> {
+    match self.regularization_type {
+      JsRegularizationType::None => None,
+      JsRegularizationType::L1 => Some(RegularizationConfig::l1_only(self.l1_lambda)),
+      JsRegularizationType::L2 => Some(RegularizationConfig::l2_only(self.l2_lambda)),
+      JsRegularizationType::ElasticNet => Some(RegularizationConfig::elastic_net(
+        self.l1_lambda,
+        self.l2_lambda,
+      )),
+    }
+  }
+}
+
+#[wasm_bindgen]
+#[derive(Debug)]
+pub struct JsRegularizationConfig {
+  inner: RegularizationConfigData,
+}
+
+impl Clone for JsRegularizationConfig {
+  fn clone(&self) -> Self {
+    Self {
+      inner: self.inner.clone(),
+    }
+  }
+}
+
+#[wasm_bindgen]
+impl JsRegularizationConfig {
+  #[wasm_bindgen(constructor)]
+  pub fn new(
+    reg_type: JsRegularizationType,
+    l1_lambda: f64,
+    l2_lambda: f64,
+  ) -> JsResult<JsRegularizationConfig> {
+    let config = RegularizationConfigData {
+      regularization_type: reg_type,
+      l1_lambda,
+      l2_lambda,
+    };
+    config.ensure_valid()?;
+    Ok(Self { inner: config })
+  }
+
+  pub(crate) fn to_domain(&self) -> Option<RegularizationConfig> {
+    self.inner.to_domain()
+  }
+
+  pub(crate) fn inner(&self) -> &RegularizationConfigData {
+    &self.inner
+  }
+}
+
+#[wasm_bindgen]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JsTaskType {
+  BinaryClassification,
+  MultiClassification,
+  Regression,
+}
+
+impl From<JsTaskType> for TaskKind {
+  fn from(value: JsTaskType) -> Self {
+    match value {
+      JsTaskType::BinaryClassification => TaskKind::BinaryClassification,
+      JsTaskType::MultiClassification => TaskKind::MultiClassification,
+      JsTaskType::Regression => TaskKind::Regression,
+    }
+  }
+}
+
+#[derive(Debug, Clone)]
+struct ModelConfigData {
+  layers: Vec<usize>,
+  activation_fn: String,
+  task_type: JsTaskType,
+}
+
+#[wasm_bindgen]
+pub struct JsModelConfig {
+  inner: ModelConfigData,
+}
+
+impl Clone for JsModelConfig {
+  fn clone(&self) -> Self {
+    Self {
+      inner: self.inner.clone(),
+    }
+  }
+}
+
+#[wasm_bindgen]
+impl JsModelConfig {
+  #[wasm_bindgen(constructor)]
+  pub fn new(
+    layers: js_sys::Array,
+    activation_fn: String,
+    task_type: JsTaskType,
+  ) -> JsResult<JsModelConfig> {
+    if layers.length() < 2 {
+      return Err(JsValue::from_str(
+        "Model must contain at least an input and an output layer",
+      ));
+    }
+
+    let mut parsed_layers = Vec::with_capacity(layers.length() as usize);
+    for idx in 0..layers.length() {
+      let value = layers.get(idx);
+      let layer_size = value
+        .as_f64()
+        .ok_or_else(|| JsValue::from_str("Layer sizes must be numeric"))?;
+      if layer_size <= 0.0 {
+        return Err(JsValue::from_str("Layer sizes must be positive"));
+      }
+      parsed_layers.push(layer_size as usize);
+    }
+
+    Ok(Self {
+      inner: ModelConfigData {
+        layers: parsed_layers,
+        activation_fn: activation_fn.to_lowercase(),
+        task_type,
+      },
+    })
+  }
+
+  #[wasm_bindgen(getter)]
+  pub fn task_type(&self) -> JsTaskType {
+    self.inner.task_type
+  }
+
+  pub(crate) fn layers(&self) -> &[usize] {
+    &self.inner.layers
+  }
+
+  pub(crate) fn activation(&self) -> &str {
+    &self.inner.activation_fn
+  }
+
+  pub(crate) fn to_inner(&self) -> ModelConfigData {
+    self.inner.clone()
+  }
+}
+
+#[derive(Debug, Clone)]
+struct TrainingConfigData {
+  epochs: usize,
+  batch_size: usize,
+  validation_split: f64,
+  optimizer_config: JsOptimizerConfig,
+  regularization_config: Option<JsRegularizationConfig>,
+  early_stopping_patience: usize,
+  early_stopping_min_delta: f64,
+  enable_early_stopping: bool,
+}
+
+#[wasm_bindgen]
+pub struct JsTrainingConfig {
+  inner: TrainingConfigData,
+}
+
+impl Clone for JsTrainingConfig {
+  fn clone(&self) -> Self {
+    Self {
+      inner: self.inner.clone(),
+    }
+  }
+}
+
+#[wasm_bindgen]
+impl JsTrainingConfig {
+  #[wasm_bindgen(constructor)]
+  pub fn new(
+    epochs: usize,
+    batch_size: usize,
+    validation_split: f64,
+    optimizer_config: JsOptimizerConfig,
+    regularization_config: Option<JsRegularizationConfig>,
+  ) -> JsResult<JsTrainingConfig> {
+    if epochs == 0 {
+      return Err(JsValue::from_str("Epoch count must be at least 1"));
+    }
+    if batch_size == 0 {
+      return Err(JsValue::from_str("Batch size must be at least 1"));
+    }
+    if validation_split < 0.0 || validation_split >= 1.0 {
+      return Err(JsValue::from_str(
+        "Validation split must be in the range [0.0, 1.0)",
+      ));
+    }
+
+    Ok(Self {
+      inner: TrainingConfigData {
+        epochs,
+        batch_size,
+        validation_split,
+        optimizer_config,
+        regularization_config,
+        early_stopping_patience: 0,
+        early_stopping_min_delta: 0.0001,
+        enable_early_stopping: false,
+      },
+    })
+  }
+
+  #[wasm_bindgen(js_name = "newWithEarlyStopping")]
+  pub fn new_with_early_stopping(
+    epochs: usize,
+    batch_size: usize,
+    validation_split: f64,
+    optimizer_config: JsOptimizerConfig,
+    regularization_config: Option<JsRegularizationConfig>,
+    enable_early_stopping: bool,
+    early_stopping_patience: usize,
+    early_stopping_min_delta: f64,
+  ) -> JsResult<JsTrainingConfig> {
+    if epochs == 0 {
+      return Err(JsValue::from_str("Epoch count must be at least 1"));
+    }
+    if batch_size == 0 {
+      return Err(JsValue::from_str("Batch size must be at least 1"));
+    }
+    if validation_split < 0.0 || validation_split >= 1.0 {
+      return Err(JsValue::from_str(
+        "Validation split must be in the range [0.0, 1.0)",
+      ));
+    }
+    if early_stopping_min_delta < 0.0 {
+      return Err(JsValue::from_str("Early stopping min delta must be >= 0"));
+    }
+
+    Ok(Self {
+      inner: TrainingConfigData {
+        epochs,
+        batch_size,
+        validation_split,
+        optimizer_config,
+        regularization_config,
+        early_stopping_patience,
+        early_stopping_min_delta,
+        enable_early_stopping,
+      },
+    })
+  }
+
+  pub(crate) fn epochs(&self) -> usize {
+    self.inner.epochs
+  }
+
+  pub(crate) fn batch_size(&self) -> usize {
+    self.inner.batch_size
+  }
+
+  pub(crate) fn validation_split(&self) -> f64 {
+    self.inner.validation_split
+  }
+
+  pub(crate) fn optimizer_config(&self) -> &JsOptimizerConfig {
+    &self.inner.optimizer_config
+  }
+
+  pub(crate) fn regularization_config(&self) -> Option<&JsRegularizationConfig> {
+    self.inner.regularization_config.as_ref()
+  }
+
+  pub(crate) fn early_stopping_patience(&self) -> usize {
+    self.inner.early_stopping_patience
+  }
+
+  pub(crate) fn early_stopping_min_delta(&self) -> f64 {
+    self.inner.early_stopping_min_delta
+  }
+
+  pub(crate) fn enable_early_stopping(&self) -> bool {
+    self.inner.enable_early_stopping
+  }
+
+  pub(crate) fn to_inner(&self) -> TrainingConfigData {
+    self.inner.clone()
+  }
+}
 
 // Enable better panic messages in debug mode
 #[cfg(feature = "console_error_panic_hook")]
@@ -345,382 +744,551 @@ impl JsModel {
   }
 }
 
-#[derive(Debug, Clone)]
-struct JsTrainingConfig {
-  learning_rate: f64,
-  epochs: usize,
-  batch_size: usize,
-  validation_split: f64,
-}
-
-impl Default for JsTrainingConfig {
-  fn default() -> Self {
-    Self {
-      learning_rate: 0.01,
-      epochs: 100,
-      batch_size: 32,
-      validation_split: 0.2,
-    }
+fn activation_from_name(name: &str) -> JsResult<Activation> {
+  match name {
+    "relu" => Ok(Activation::ReLU),
+    "sigmoid" => Ok(Activation::Sigmoid),
+    "tanh" => Ok(Activation::Tanh),
+    "linear" | "none" => Ok(Activation::None),
+    "softmax" => Ok(Activation::Softmax),
+    other => Err(JsValue::from_str(&format!(
+      "Unsupported activation function: {}",
+      other
+    ))),
   }
 }
 
-/// JavaScript-compatible wrapper for training functionality
+fn output_activation_for_task(task: JsTaskType) -> Activation {
+  match task {
+    JsTaskType::BinaryClassification => Activation::Sigmoid,
+    JsTaskType::MultiClassification => Activation::Softmax,
+    JsTaskType::Regression => Activation::None,
+  }
+}
+
+fn build_sequential_model(
+  config: &ModelConfigData,
+  graph: Rc<RefCell<ComputationGraph>>,
+) -> JsResult<Sequential> {
+  let hidden_activation = activation_from_name(&config.activation_fn)?;
+  let output_activation = output_activation_for_task(config.task_type);
+
+  let mut model = Sequential::new();
+
+  for (idx, window) in config.layers.windows(2).enumerate() {
+    let input_size = window[0];
+    let output_size = window[1];
+    let activation = if idx == config.layers.len() - 2 {
+      output_activation
+    } else {
+      hidden_activation
+    };
+    model = model.dense(
+      input_size,
+      output_size,
+      activation,
+      WeightInit::XavierUniform,
+    );
+  }
+
+  Ok(model.with_graph(graph))
+}
+
+fn create_loss_for_task(task: JsTaskType) -> Box<dyn Loss> {
+  match task {
+    JsTaskType::BinaryClassification => Box::new(BinaryCrossEntropy::new()),
+    JsTaskType::MultiClassification => Box::new(CrossEntropy::new()),
+    JsTaskType::Regression => Box::new(MeanSquaredError::new()),
+  }
+}
+
+fn create_metric_sets_for_task(task: JsTaskType) -> (Vec<Box<dyn Metric>>, Vec<Box<dyn Metric>>) {
+  match task {
+    JsTaskType::BinaryClassification => (
+      vec![
+        Box::new(Accuracy::default()) as Box<dyn Metric>,
+        Box::new(Precision::default()),
+        Box::new(Recall::default()),
+        Box::new(F1Score::default()),
+      ],
+      vec![
+        Box::new(Accuracy::default()) as Box<dyn Metric>,
+        Box::new(Precision::default()),
+        Box::new(Recall::default()),
+        Box::new(F1Score::default()),
+      ],
+    ),
+    JsTaskType::MultiClassification => (
+      vec![Box::new(CategoricalAccuracy) as Box<dyn Metric>],
+      vec![Box::new(CategoricalAccuracy) as Box<dyn Metric>],
+    ),
+    JsTaskType::Regression => (
+      vec![Box::new(MeanSquaredErrorMetric) as Box<dyn Metric>],
+      vec![Box::new(MeanSquaredErrorMetric) as Box<dyn Metric>],
+    ),
+  }
+}
+
+fn metric_lookup(metrics: &HashMap<String, f64>, key: &str) -> Option<f64> {
+  metrics.get(key).copied()
+}
+
 #[wasm_bindgen]
 pub struct JsTrainer {
-  config: JsTrainingConfig,
+  model_config: ModelConfigData,
+  training_config: TrainingConfigData,
+  task_type: JsTaskType,
+  graph: Rc<RefCell<ComputationGraph>>,
+  model: RefCell<Sequential>,
 }
 
 #[wasm_bindgen]
 impl JsTrainer {
-  /// Create a new trainer
   #[wasm_bindgen(constructor)]
-  pub fn new(learning_rate: f64) -> JsTrainer {
-    let mut config = JsTrainingConfig::default();
-    config.learning_rate = learning_rate;
-    JsTrainer { config }
+  pub fn new(
+    model_config: &JsModelConfig,
+    training_config: &JsTrainingConfig,
+  ) -> JsResult<JsTrainer> {
+    let graph = Rc::new(RefCell::new(ComputationGraph::new()));
+    let model_config_inner = model_config.to_inner();
+    let training_config_inner = training_config.to_inner();
+    let model = build_sequential_model(&model_config_inner, graph.clone())?;
+
+    Ok(Self {
+      model_config: model_config_inner.clone(),
+      training_config: training_config_inner.clone(),
+      task_type: model_config_inner.task_type,
+      graph,
+      model: RefCell::new(model),
+    })
   }
 
-  /// Set training configuration
-  #[wasm_bindgen]
-  pub fn configure(
-    &mut self,
-    learning_rate: f64,
-    epochs: usize,
-    batch_size: usize,
-    validation_split: f64,
-  ) {
-    self.config.learning_rate = learning_rate;
-    self.config.epochs = epochs;
-    self.config.batch_size = batch_size;
-    self.config.validation_split = validation_split;
-  }
-
-  /// Train model synchronously (blocking)
-  #[wasm_bindgen]
-  pub fn train_sync(
-    &mut self,
-    model: &mut JsModel,
-    dataset: &JsDataset,
-  ) -> JsResult<js_sys::Array> {
-    // Convert dataset to internal format
-    let features = dataset.features_tensor()?.inner;
-    let labels = dataset.labels_tensor()?.inner;
-
-    // Create a simple dataset wrapper (this would need to be implemented in the core library)
-    // For now, we'll implement basic training loop here
-
-    let history = js_sys::Array::new();
-    let epochs = self.config.epochs.max(1);
-
-    for epoch in 0..epochs {
-      // Forward pass
-      let predictions = model
-        .inner
-        .forward(features.clone())
-        .map_err(|e| JsValue::from_str(&format!("Forward pass failed: {}", e)))?;
-
-      // Compute loss (binary cross entropy for demo)
-      let loss_fn = BinaryCrossEntropy::new();
-      let loss = loss_fn
-        .forward(&predictions, &labels)
-        .map_err(|e| JsValue::from_str(&format!("Loss computation failed: {}", e)))?;
-
-      // Compute accuracy
-      let accuracy_metric = Accuracy::new(0.5);
-      let accuracy = accuracy_metric
-        .compute(&predictions, &labels)
-        .map_err(|e| JsValue::from_str(&format!("Accuracy computation failed: {}", e)))?;
-
-      // Create epoch result
-      let epoch_result = js_sys::Object::new();
-      js_sys::Reflect::set(&epoch_result, &"epoch".into(), &JsValue::from(epoch))?;
-      js_sys::Reflect::set(
-        &epoch_result,
-        &"loss".into(),
-        &JsValue::from(loss.data[[0, 0]]),
-      )?;
-      js_sys::Reflect::set(&epoch_result, &"accuracy".into(), &JsValue::from(accuracy))?;
-
-      history.push(&epoch_result);
-
-      // Log progress
-      Utils::log(&format!(
-        "Epoch {}/{} - Loss: {:.4} - Accuracy: {:.4}",
-        epoch + 1,
-        epochs,
-        loss.data[[0, 0]],
-        accuracy
+  pub async fn train(&mut self, dataset: &JsDataset) -> JsResult<JsTrainingResult> {
+    if dataset.task_type() != self.task_type {
+      return Err(JsValue::from_str(
+        "Dataset task type does not match trainer configuration",
       ));
     }
 
-    Ok(history)
-  }
-}
-
-/// Asynchronous training functionality for better browser performance
-#[wasm_bindgen]
-pub struct AsyncTrainer {
-  config: JsTrainingConfig,
-}
-
-#[wasm_bindgen]
-impl AsyncTrainer {
-  /// Create a new async trainer
-  #[wasm_bindgen(constructor)]
-  pub fn new(learning_rate: f64, epochs: usize, batch_size: usize) -> AsyncTrainer {
-    let config = JsTrainingConfig {
-      learning_rate,
-      epochs,
-      batch_size,
-      validation_split: 0.2,
-    };
-
-    AsyncTrainer { config }
-  }
-
-  /// Start training asynchronously with progress callbacks
-  #[wasm_bindgen]
-  pub async fn train_async(
-    &self,
-    model: &mut JsModel,
-    dataset: &JsDataset,
-    progress_callback: Option<js_sys::Function>,
-  ) -> JsResult<js_sys::Array> {
-    // Create loss function and optimizer
-    let loss_fn = BinaryCrossEntropy::new();
-    let mut optimizer = SGD::new(self.config.learning_rate);
-
-    let features = dataset
-      .features_tensor()?
-      .inner
-      .with_graph(model.graph.clone());
-    let labels = dataset.labels_tensor()?.inner;
-    let history = js_sys::Array::new();
-
-    // Ensure features tensor requires gradients and is tracked
-    let mut tracked_features = features.clone();
-    tracked_features.set_requires_grad(true);
-
-    for epoch in 0..self.config.epochs {
-      // Yield control to browser between epochs
-      yield_to_browser().await;
-
-      // Set model to training mode
-      model.inner.train();
-
-      // Forward pass with gradient tracking
-      let predictions = model
-        .inner
-        .forward(tracked_features.clone())
-        .map_err(|e| JsValue::from_str(&format!("Forward pass failed: {}", e)))?;
-
-      // Compute loss
-      let loss = loss_fn
-        .forward(&predictions, &labels)
-        .map_err(|e| JsValue::from_str(&format!("Loss computation failed: {}", e)))?;
-
-      // Backward pass - compute gradients
-      let loss_grad = loss_fn
-        .backward(&predictions, &labels)
-        .map_err(|e| JsValue::from_str(&format!("Loss backward failed: {}", e)))?;
-
-      // Backpropagate gradients through computation graph
-      if let (Some(graph_weak), Some(node_id)) = (&predictions.graph, predictions.graph_id) {
-        if let Some(graph) = graph_weak.upgrade() {
-          graph
-            .borrow_mut()
-            .backward(node_id, Some(loss_grad.data.clone()))
-            .map_err(|e| JsValue::from_str(&format!("Gradient computation failed: {}", e)))?;
-        }
-      }
-
-      // Update parameters using optimizer
-      model
-        .inner
-        .sync_gradients()
-        .map_err(|e| JsValue::from_str(&format!("Gradient sync failed: {}", e)))?;
-
-      let mut params = model.inner.parameters_mut();
-      optimizer
-        .step(params.as_mut_slice())
-        .map_err(|e| JsValue::from_str(&format!("Parameter update failed: {}", e)))?;
-      optimizer.zero_grad(params.as_mut_slice());
-
-      // Clear gradients for next iteration
-      model.inner.zero_grad();
-
-      // Compute accuracy for this epoch
-      let accuracy_metric = Accuracy::new(0.5);
-      let accuracy = accuracy_metric
-        .compute(&predictions, &labels)
-        .map_err(|e| JsValue::from_str(&format!("Accuracy computation failed: {}", e)))?;
-
-      let loss_val = loss.data[[0, 0]];
-
-      // Create progress object
-      let progress = TrainingProgress {
-        epoch: epoch + 1,
-        loss: loss_val,
-        accuracy,
-        val_loss: loss_val * (1.0 + (js_sys::Math::random() - 0.5) * 0.2), // Simulated validation
-        val_accuracy: accuracy * (0.95 + js_sys::Math::random() * 0.1),    // Simulated validation
-      };
-
-      // Call progress callback if provided
-      if let Some(callback) = &progress_callback {
-        let progress_obj = js_sys::Object::new();
-        js_sys::Reflect::set(
-          &progress_obj,
-          &"epoch".into(),
-          &JsValue::from(progress.epoch),
-        )?;
-        js_sys::Reflect::set(&progress_obj, &"loss".into(), &JsValue::from(progress.loss))?;
-        js_sys::Reflect::set(
-          &progress_obj,
-          &"accuracy".into(),
-          &JsValue::from(progress.accuracy),
-        )?;
-        js_sys::Reflect::set(
-          &progress_obj,
-          &"val_loss".into(),
-          &JsValue::from(progress.val_loss),
-        )?;
-        js_sys::Reflect::set(
-          &progress_obj,
-          &"val_accuracy".into(),
-          &JsValue::from(progress.val_accuracy),
-        )?;
-
-        let _ = callback.call1(&JsValue::NULL, &progress_obj);
-      }
-
-      // Add to history
-      let epoch_result = js_sys::Object::new();
-      js_sys::Reflect::set(
-        &epoch_result,
-        &"epoch".into(),
-        &JsValue::from(progress.epoch),
-      )?;
-      js_sys::Reflect::set(&epoch_result, &"loss".into(), &JsValue::from(progress.loss))?;
-      js_sys::Reflect::set(
-        &epoch_result,
-        &"accuracy".into(),
-        &JsValue::from(progress.accuracy),
-      )?;
-      js_sys::Reflect::set(
-        &epoch_result,
-        &"val_loss".into(),
-        &JsValue::from(progress.val_loss),
-      )?;
-      js_sys::Reflect::set(
-        &epoch_result,
-        &"val_accuracy".into(),
-        &JsValue::from(progress.val_accuracy),
-      )?;
-
-      history.push(&epoch_result);
+    if dataset.len() == 0 {
+      return Err(JsValue::from_str("Dataset is empty"));
     }
 
-    Ok(history)
+    let output_size = *self
+      .model_config
+      .layers
+      .last()
+      .ok_or_else(|| JsValue::from_str("Model configuration has no layers"))?;
+
+    if dataset.label_dim() != output_size {
+      return Err(JsValue::from_str(&format!(
+        "Dataset label dimension ({}) does not match model output size ({})",
+        dataset.label_dim(),
+        output_size
+      )));
+    }
+
+    let total_samples = dataset.len();
+    let validation_ratio = self.training_config.validation_split;
+    let mut val_count = if validation_ratio > 0.0 {
+      ((total_samples as f64) * validation_ratio).round() as usize
+    } else {
+      0
+    };
+
+    if val_count >= total_samples {
+      val_count = total_samples.saturating_sub(1);
+    }
+
+    let train_count = total_samples - val_count;
+    let (train_features, val_features) = dataset.split_features(train_count);
+    let (train_labels, val_labels) = dataset.split_labels(train_count);
+
+    let mut train_x = Tensor::new(train_features.clone()).map_err(|e| {
+      JsValue::from_str(&format!("Failed to create training feature tensor: {}", e))
+    })?;
+    train_x = train_x.with_graph(self.graph.clone());
+    train_x.set_requires_grad(true);
+
+    let train_y = Tensor::new(train_labels.clone())
+      .map_err(|e| JsValue::from_str(&format!("Failed to create training label tensor: {}", e)))?;
+
+    let (val_x_tensor, val_y_tensor) = if val_count > 0 {
+      let val_x = Tensor::new(val_features.clone()).map_err(|e| {
+        JsValue::from_str(&format!(
+          "Failed to create validation feature tensor: {}",
+          e
+        ))
+      })?;
+      let val_y = Tensor::new(val_labels.clone()).map_err(|e| {
+        JsValue::from_str(&format!("Failed to create validation label tensor: {}", e))
+      })?;
+      (Some(val_x), Some(val_y))
+    } else {
+      (None, None)
+    };
+
+    let mut optimizer = self
+      .training_config
+      .optimizer_config
+      .inner()
+      .build_optimizer();
+
+    let domain_config = TrainingConfig {
+      epochs: self.training_config.epochs,
+      batch_size: self.training_config.batch_size,
+      shuffle: true,
+      validation_frequency: if val_count > 0 { 1 } else { 0 },
+      verbose: true, // Enable verbose output for WASM
+      early_stopping_patience: self.training_config.early_stopping_patience,
+      early_stopping_min_delta: self.training_config.early_stopping_min_delta,
+      enable_early_stopping: self.training_config.enable_early_stopping,
+      learning_rate: self.training_config.optimizer_config.inner().learning_rate,
+      regularization: self
+        .training_config
+        .regularization_config
+        .as_ref()
+        .and_then(|cfg| cfg.to_domain()),
+      #[cfg(not(target_arch = "wasm32"))]
+      show_gui_plots: false,
+    };
+
+    let mut model_ref = self.model.get_mut();
+
+    // Create trainer with specific optimizer type
+    let mut trainer = match self.training_config.optimizer_config.inner().optimizer_type {
+      JsOptimizerType::GD => {
+        let opt = GradientDescent::new(self.training_config.optimizer_config.inner().learning_rate);
+        match self.task_type {
+          JsTaskType::BinaryClassification => {
+            Trainer::new(&mut model_ref, BinaryCrossEntropy::new(), opt)
+          }
+          JsTaskType::MultiClassification => Trainer::new(&mut model_ref, CrossEntropy::new(), opt),
+          JsTaskType::Regression => Trainer::new(&mut model_ref, MeanSquaredError::new(), opt),
+        }
+      }
+      JsOptimizerType::SGD => {
+        let opt = SGD::new(self.training_config.optimizer_config.inner().learning_rate);
+        match self.task_type {
+          JsTaskType::BinaryClassification => {
+            Trainer::new(&mut model_ref, BinaryCrossEntropy::new(), opt)
+          }
+          JsTaskType::MultiClassification => Trainer::new(&mut model_ref, CrossEntropy::new(), opt),
+          JsTaskType::Regression => Trainer::new(&mut model_ref, MeanSquaredError::new(), opt),
+        }
+      }
+      JsOptimizerType::SGDMomentum => {
+        let opt = SGDMomentum::new(
+          self.training_config.optimizer_config.inner().learning_rate,
+          0.9,
+        );
+        match self.task_type {
+          JsTaskType::BinaryClassification => {
+            Trainer::new(&mut model_ref, BinaryCrossEntropy::new(), opt)
+          }
+          JsTaskType::MultiClassification => Trainer::new(&mut model_ref, CrossEntropy::new(), opt),
+          JsTaskType::Regression => Trainer::new(&mut model_ref, MeanSquaredError::new(), opt),
+        }
+      }
+      JsOptimizerType::RMSProp => {
+        let opt = RMSProp::new(self.training_config.optimizer_config.inner().learning_rate);
+        match self.task_type {
+          JsTaskType::BinaryClassification => {
+            Trainer::new(&mut model_ref, BinaryCrossEntropy::new(), opt)
+          }
+          JsTaskType::MultiClassification => Trainer::new(&mut model_ref, CrossEntropy::new(), opt),
+          JsTaskType::Regression => Trainer::new(&mut model_ref, MeanSquaredError::new(), opt),
+        }
+      }
+      JsOptimizerType::Adam => {
+        let opt = Adam::new(self.training_config.optimizer_config.inner().learning_rate);
+        match self.task_type {
+          JsTaskType::BinaryClassification => {
+            Trainer::new(&mut model_ref, BinaryCrossEntropy::new(), opt)
+          }
+          JsTaskType::MultiClassification => Trainer::new(&mut model_ref, CrossEntropy::new(), opt),
+          JsTaskType::Regression => Trainer::new(&mut model_ref, MeanSquaredError::new(), opt),
+        }
+      }
+    }
+    .with_config(domain_config);
+
+    let (train_metrics, val_metrics) = create_metric_sets_for_task(self.task_type);
+    for metric in train_metrics.into_iter() {
+      trainer = trainer.with_train_metric_box(metric);
+    }
+    for metric in val_metrics.into_iter() {
+      trainer = trainer.with_val_metric_box(metric);
+    }
+
+    let history = trainer
+      .fit(
+        &train_x,
+        &train_y,
+        val_x_tensor.as_ref(),
+        val_y_tensor.as_ref(),
+      )
+      .map_err(|e| JsValue::from_str(&format!("Training failed: {}", e)))?
+      .clone();
+
+    drop(trainer);
+
+    Ok(JsTrainingResult::from_history(history, self.task_type))
   }
 
-  /// Get training configuration as JavaScript object
-  #[wasm_bindgen]
-  pub fn get_config(&self) -> js_sys::Object {
-    let config = js_sys::Object::new();
-    js_sys::Reflect::set(
-      &config,
-      &"learning_rate".into(),
-      &JsValue::from(self.config.learning_rate),
-    )
-    .unwrap();
-    js_sys::Reflect::set(
-      &config,
-      &"epochs".into(),
-      &JsValue::from(self.config.epochs),
-    )
-    .unwrap();
-    js_sys::Reflect::set(
-      &config,
-      &"batch_size".into(),
-      &JsValue::from(self.config.batch_size),
-    )
-    .unwrap();
-    js_sys::Reflect::set(
-      &config,
-      &"validation_split".into(),
-      &JsValue::from(self.config.validation_split),
-    )
-    .unwrap();
-    config
+  pub fn predict(&self, input: &JsTensor) -> JsResult<JsTensor> {
+    let mut model_ref = self.model.borrow_mut();
+    let mut tensor = input.inner.clone().with_graph(self.graph.clone());
+    tensor.set_requires_grad(false);
+    let output = model_ref
+      .forward(tensor)
+      .map_err(|e| JsValue::from_str(&format!("Prediction failed: {}", e)))?;
+    Ok(JsTensor { inner: output })
+  }
+
+  pub fn weight_matrices(&self) -> js_sys::Array {
+    let model_ref = self.model.borrow();
+    let matrices = model_ref.weight_matrices();
+    let outer = js_sys::Array::new();
+
+    for layer_matrix in matrices {
+      let js_layer = js_sys::Array::new();
+      for row in layer_matrix {
+        let js_row = js_sys::Array::new();
+        for value in row {
+          js_row.push(&JsValue::from_f64(value));
+        }
+        js_layer.push(&js_row);
+      }
+      outer.push(&js_layer);
+    }
+
+    outer
+  }
+
+  pub fn bias_vectors(&self) -> js_sys::Array {
+    let model_ref = self.model.borrow();
+    let vectors = model_ref.bias_vectors();
+    let outer = js_sys::Array::new();
+
+    for bias in vectors {
+      let js_bias = js_sys::Array::new();
+      for value in bias {
+        js_bias.push(&JsValue::from_f64(value));
+      }
+      outer.push(&js_bias);
+    }
+
+    outer
   }
 }
 
-/// Yield control to browser to prevent blocking
-async fn yield_to_browser() {
-  use wasm_bindgen_futures::JsFuture;
-
-  // Use setTimeout(0) to yield control
-  let promise = js_sys::Promise::resolve(&JsValue::from(0));
-  let _ = JsFuture::from(promise).await;
+#[wasm_bindgen]
+pub struct JsTrainingResult {
+  loss_history: Vec<f64>,
+  accuracy_history: Vec<f64>,
+  val_loss_history: Vec<f64>,
+  val_accuracy_history: Vec<f64>,
+  metrics: JsMetrics,
 }
 
-/// Progress callback for training
-#[wasm_bindgen]
-extern "C" {
-  #[wasm_bindgen(js_namespace = console)]
-  fn log(s: &str);
+impl JsTrainingResult {
+  fn from_history(history: TrainingHistory, task: JsTaskType) -> JsTrainingResult {
+    let loss_history = history.train_losses();
+    let val_loss_history = history
+      .epochs
+      .iter()
+      .map(|epoch| epoch.val_loss.unwrap_or(f64::NAN))
+      .collect();
 
-  /// Callback function type for training progress
-  /// Called with (epoch, loss, accuracy, val_loss, val_accuracy)
-  pub type ProgressCallback;
+    let accuracy_key = match task {
+      JsTaskType::BinaryClassification => "accuracy",
+      JsTaskType::MultiClassification => "categorical_accuracy",
+      JsTaskType::Regression => "mse",
+    };
 
-  #[wasm_bindgen(method)]
-  fn call(
-    this: &ProgressCallback,
-    epoch: usize,
-    loss: f64,
-    accuracy: f64,
-    val_loss: f64,
-    val_accuracy: f64,
-  );
+    let accuracy_history = history
+      .epochs
+      .iter()
+      .map(|epoch| metric_lookup(&epoch.train_metrics, accuracy_key).unwrap_or(f64::NAN))
+      .collect();
+
+    let val_accuracy_history = history
+      .epochs
+      .iter()
+      .map(|epoch| metric_lookup(&epoch.val_metrics, accuracy_key).unwrap_or(f64::NAN))
+      .collect();
+
+    let metrics = JsMetrics::from_epoch(history.epochs.last(), task);
+
+    JsTrainingResult {
+      loss_history,
+      accuracy_history,
+      val_loss_history,
+      val_accuracy_history,
+      metrics,
+    }
+  }
 }
 
-/// Training progress data structure
 #[wasm_bindgen]
-pub struct TrainingProgress {
-  epoch: usize,
-  loss: f64,
-  accuracy: f64,
-  val_loss: f64,
-  val_accuracy: f64,
-}
-
-#[wasm_bindgen]
-impl TrainingProgress {
+impl JsTrainingResult {
   #[wasm_bindgen(getter)]
-  pub fn epoch(&self) -> usize {
-    self.epoch
+  pub fn loss_history(&self) -> js_sys::Array {
+    self
+      .loss_history
+      .iter()
+      .map(|v| JsValue::from_f64(*v))
+      .collect()
+  }
+
+  #[wasm_bindgen(getter)]
+  pub fn accuracy_history(&self) -> js_sys::Array {
+    self
+      .accuracy_history
+      .iter()
+      .map(|v| JsValue::from_f64(*v))
+      .collect()
+  }
+
+  #[wasm_bindgen(getter)]
+  pub fn validation_loss_history(&self) -> js_sys::Array {
+    self
+      .val_loss_history
+      .iter()
+      .map(|v| JsValue::from_f64(*v))
+      .collect()
+  }
+
+  #[wasm_bindgen(getter)]
+  pub fn validation_accuracy_history(&self) -> js_sys::Array {
+    self
+      .val_accuracy_history
+      .iter()
+      .map(|v| JsValue::from_f64(*v))
+      .collect()
+  }
+
+  #[wasm_bindgen(getter)]
+  pub fn final_metrics(&self) -> JsMetrics {
+    self.metrics.clone()
+  }
+}
+
+#[derive(Debug, Clone)]
+struct MetricsData {
+  loss: f64,
+  accuracy: Option<f64>,
+  precision: Option<f64>,
+  recall: Option<f64>,
+  f1_score: Option<f64>,
+  mse: Option<f64>,
+}
+
+#[wasm_bindgen]
+#[derive(Clone)]
+pub struct JsMetrics {
+  inner: MetricsData,
+}
+
+impl JsMetrics {
+  fn from_epoch(epoch: Option<&EpochHistory>, task: JsTaskType) -> JsMetrics {
+    if let Some(epoch) = epoch {
+      let loss = epoch.val_loss.unwrap_or(epoch.train_loss);
+      let accuracy_key = match task {
+        JsTaskType::BinaryClassification => "accuracy",
+        JsTaskType::MultiClassification => "categorical_accuracy",
+        JsTaskType::Regression => "mse",
+      };
+
+      let accuracy = metric_lookup(&epoch.val_metrics, accuracy_key)
+        .or_else(|| metric_lookup(&epoch.train_metrics, accuracy_key));
+
+      JsMetrics {
+        inner: MetricsData {
+          loss,
+          accuracy,
+          precision: metric_lookup(&epoch.train_metrics, "precision"),
+          recall: metric_lookup(&epoch.train_metrics, "recall"),
+          f1_score: metric_lookup(&epoch.train_metrics, "f1_score"),
+          mse: metric_lookup(&epoch.train_metrics, "mse"),
+        },
+      }
+    } else {
+      JsMetrics {
+        inner: MetricsData {
+          loss: 0.0,
+          accuracy: None,
+          precision: None,
+          recall: None,
+          f1_score: None,
+          mse: None,
+        },
+      }
+    }
+  }
+}
+
+#[wasm_bindgen]
+impl JsMetrics {
+  #[wasm_bindgen(getter)]
+  pub fn accuracy(&self) -> f64 {
+    self.inner.accuracy.unwrap_or(0.0)
   }
 
   #[wasm_bindgen(getter)]
   pub fn loss(&self) -> f64 {
-    self.loss
+    self.inner.loss
   }
 
   #[wasm_bindgen(getter)]
-  pub fn accuracy(&self) -> f64 {
-    self.accuracy
+  pub fn precision(&self) -> Option<f64> {
+    self.inner.precision
   }
 
   #[wasm_bindgen(getter)]
-  pub fn val_loss(&self) -> f64 {
-    self.val_loss
+  pub fn recall(&self) -> Option<f64> {
+    self.inner.recall
   }
 
   #[wasm_bindgen(getter)]
-  pub fn val_accuracy(&self) -> f64 {
-    self.val_accuracy
+  pub fn f1_score(&self) -> Option<f64> {
+    self.inner.f1_score
+  }
+
+  #[wasm_bindgen(getter)]
+  pub fn mse(&self) -> Option<f64> {
+    self.inner.mse
+  }
+}
+
+#[wasm_bindgen]
+pub struct JsDataPoint {
+  x: f64,
+  y: f64,
+  label: f64,
+}
+
+#[wasm_bindgen]
+impl JsDataPoint {
+  #[wasm_bindgen(constructor)]
+  pub fn new(x: f64, y: f64, label: f64) -> JsDataPoint {
+    JsDataPoint { x, y, label }
+  }
+
+  #[wasm_bindgen(getter)]
+  pub fn x(&self) -> f64 {
+    self.x
+  }
+
+  #[wasm_bindgen(getter)]
+  pub fn y(&self) -> f64 {
+    self.y
+  }
+
+  #[wasm_bindgen(getter)]
+  pub fn label(&self) -> f64 {
+    self.label
   }
 }
 
@@ -728,15 +1296,15 @@ impl TrainingProgress {
 #[wasm_bindgen]
 pub struct JsDataset {
   features: Vec<Vec<f64>>,
-  labels: Vec<f64>,
+  labels: Vec<Vec<f64>>,
+  task_type: JsTaskType,
 }
 
 #[wasm_bindgen]
 impl JsDataset {
-  /// Create a new dataset from features and labels
+  /// Create a new dataset from features and labels (defaulting to binary classification)
   #[wasm_bindgen(constructor)]
   pub fn new(features: js_sys::Array, labels: Float64Array) -> JsResult<JsDataset> {
-    // Convert JS array of arrays to Vec<Vec<f64>>
     let mut feature_vec = Vec::new();
 
     for i in 0..features.length() {
@@ -750,18 +1318,18 @@ impl JsDataset {
       }
     }
 
+    let mut label_matrix = Vec::new();
     let label_vec = labels.to_vec();
-
-    if feature_vec.len() != label_vec.len() {
-      return Err(JsValue::from_str(
-        "Features and labels must have the same length",
-      ));
+    for value in label_vec {
+      label_matrix.push(vec![value]);
     }
 
-    Ok(JsDataset {
-      features: feature_vec,
-      labels: label_vec,
-    })
+    JsDataset::from_data(feature_vec, label_matrix, JsTaskType::BinaryClassification)
+  }
+
+  #[wasm_bindgen(getter)]
+  pub fn task_type(&self) -> JsTaskType {
+    self.task_type
   }
 
   /// Get the number of samples
@@ -773,11 +1341,7 @@ impl JsDataset {
   /// Get the number of features per sample
   #[wasm_bindgen]
   pub fn feature_count(&self) -> usize {
-    if self.features.is_empty() {
-      0
-    } else {
-      self.features[0].len()
-    }
+    self.features.first().map(|row| row.len()).unwrap_or(0)
   }
 
   /// Get features as a tensor
@@ -796,16 +1360,14 @@ impl JsDataset {
     }
   }
 
-  /// Get labels as a tensor (column vector)
+  /// Get labels as a tensor
   #[wasm_bindgen]
   pub fn labels_tensor(&self) -> JsResult<JsTensor> {
     if self.labels.is_empty() {
       return Err(JsValue::from_str("Dataset is empty"));
     }
 
-    let label_data: Vec<Vec<f64>> = self.labels.iter().map(|&label| vec![label]).collect();
-
-    match Tensor::new(label_data) {
+    match Tensor::new(self.labels.clone()) {
       Ok(tensor) => Ok(JsTensor { inner: tensor }),
       Err(e) => Err(JsValue::from_str(&format!(
         "Failed to create labels tensor: {}",
@@ -813,6 +1375,97 @@ impl JsDataset {
       ))),
     }
   }
+}
+
+impl JsDataset {
+  pub(crate) fn from_data(
+    features: Vec<Vec<f64>>,
+    labels: Vec<Vec<f64>>,
+    task_type: JsTaskType,
+  ) -> JsResult<JsDataset> {
+    if features.len() != labels.len() {
+      return Err(JsValue::from_str(
+        "Features and labels must contain the same number of samples",
+      ));
+    }
+
+    if let Some(expected) = features.first().map(|row| row.len()) {
+      if !features.iter().all(|row| row.len() == expected) {
+        return Err(JsValue::from_str("Inconsistent feature dimensions"));
+      }
+    }
+
+    if let Some(expected) = labels.first().map(|row| row.len()) {
+      if !labels.iter().all(|row| row.len() == expected) {
+        return Err(JsValue::from_str("Inconsistent label dimensions"));
+      }
+    }
+
+    Ok(JsDataset {
+      features,
+      labels,
+      task_type,
+    })
+  }
+
+  pub(crate) fn label_dim(&self) -> usize {
+    self.labels.first().map(|row| row.len()).unwrap_or(0)
+  }
+
+  pub(crate) fn split_features(&self, train_count: usize) -> (Vec<Vec<f64>>, Vec<Vec<f64>>) {
+    let total = self.features.len();
+    let split = train_count.min(total);
+    let train = self.features[..split].to_vec();
+    let val = if split < total {
+      self.features[split..].to_vec()
+    } else {
+      Vec::new()
+    };
+    (train, val)
+  }
+
+  pub(crate) fn split_labels(&self, train_count: usize) -> (Vec<Vec<f64>>, Vec<Vec<f64>>) {
+    let total = self.labels.len();
+    let split = train_count.min(total);
+    let train = self.labels[..split].to_vec();
+    let val = if split < total {
+      self.labels[split..].to_vec()
+    } else {
+      Vec::new()
+    };
+    (train, val)
+  }
+}
+
+#[wasm_bindgen]
+pub fn generate_dataset_from_points(points: js_sys::Array) -> JsResult<JsDataset> {
+  if points.length() == 0 {
+    return Err(JsValue::from_str("Point collection must not be empty"));
+  }
+
+  let mut features = Vec::with_capacity(points.length() as usize);
+  let mut labels = Vec::with_capacity(points.length() as usize);
+
+  for value in points.iter() {
+    // Extract data point properties directly from JS object
+    let x = js_sys::Reflect::get(&value, &JsValue::from_str("x"))
+      .map_err(|_| JsValue::from_str("Data point missing 'x' property"))?
+      .as_f64()
+      .ok_or_else(|| JsValue::from_str("Data point 'x' must be numeric"))?;
+    let y = js_sys::Reflect::get(&value, &JsValue::from_str("y"))
+      .map_err(|_| JsValue::from_str("Data point missing 'y' property"))?
+      .as_f64()
+      .ok_or_else(|| JsValue::from_str("Data point 'y' must be numeric"))?;
+    let label = js_sys::Reflect::get(&value, &JsValue::from_str("label"))
+      .map_err(|_| JsValue::from_str("Data point missing 'label' property"))?
+      .as_f64()
+      .ok_or_else(|| JsValue::from_str("Data point 'label' must be numeric"))?;
+
+    features.push(vec![x, y]);
+    labels.push(vec![label]);
+  }
+
+  JsDataset::from_data(features, labels, JsTaskType::BinaryClassification)
 }
 
 /// Data conversion utilities between JavaScript and Rust types
