@@ -1,6 +1,6 @@
 use crate::core::{Result, TensorError};
 use crate::domain::ports::DataRepository;
-use crate::domain::types::{BreastCancerRecord, DataConfig, Dataset, Diagnosis};
+use crate::domain::types::{DataConfig, Dataset, TaskKind};
 use ndarray::{Array1, Array2};
 use std::fs::File;
 use std::path::PathBuf;
@@ -31,10 +31,7 @@ impl CsvDataRepository {
         )));
       }
 
-      let id: u32 = record[0]
-        .parse()
-        .map_err(|e| TensorError::InvalidValue(format!("Invalid ID: {}", e)))?;
-
+      let id = record[0].to_string();
       let diagnosis = Diagnosis::parse(&record[1])?;
 
       let mut features = Array1::zeros(30);
@@ -67,20 +64,59 @@ impl DataRepository for CsvDataRepository {
 
     let n_samples = records.len();
     let mut features_matrix = Array2::zeros((n_samples, 30));
-    let mut labels = Array1::zeros(n_samples);
+    let mut targets = Array2::zeros((n_samples, 1));
     let mut ids = Vec::with_capacity(n_samples);
 
     for (i, record) in records.into_iter().enumerate() {
       features_matrix.row_mut(i).assign(&record.features);
-      labels[i] = record.diagnosis.to_f64();
+      targets[[i, 0]] = record.diagnosis.to_f64();
       ids.push(record.id);
     }
 
-    let mut dataset = Dataset::from_parts(features_matrix, labels, ids, None, config.clone());
+    let mut dataset = Dataset::new(
+      TaskKind::BinaryClassification,
+      features_matrix,
+      targets,
+      config.clone(),
+    )
+    .with_sample_ids(ids);
 
     dataset.preprocess()?;
 
     Ok(dataset)
+  }
+}
+
+#[derive(Debug, Clone)]
+struct BreastCancerRecord {
+  id: String,
+  diagnosis: Diagnosis,
+  features: Array1<f64>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Diagnosis {
+  Malignant,
+  Benign,
+}
+
+impl Diagnosis {
+  pub fn to_f64(self) -> f64 {
+    match self {
+      Diagnosis::Malignant => 1.0,
+      Diagnosis::Benign => 0.0,
+    }
+  }
+
+  pub fn parse(value: &str) -> Result<Self> {
+    match value.trim() {
+      "M" => Ok(Diagnosis::Malignant),
+      "B" => Ok(Diagnosis::Benign),
+      other => Err(TensorError::InvalidValue(format!(
+        "Invalid diagnosis value: {}. Expected 'M' or 'B'",
+        other
+      ))),
+    }
   }
 }
 
@@ -112,7 +148,10 @@ mod tests {
       .expect("Failed to load dataset");
 
     assert_eq!(dataset.len(), 2);
-    assert_eq!(dataset.class_distribution().len(), 2);
+    let distribution = dataset
+      .class_distribution()
+      .expect("classification distribution");
+    assert_eq!(distribution.len(), 2);
     remove_file(csv_path).unwrap();
   }
 }
