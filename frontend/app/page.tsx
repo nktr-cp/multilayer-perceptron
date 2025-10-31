@@ -5,22 +5,21 @@ import { motion } from "framer-motion"
 import { NetworkVisualizer } from "@/components/network-visualizer"
 import { LayerControlPanel } from "@/components/layer-control-panel"
 import { TrainingDashboard } from "@/components/training-dashboard"
-import { DatasetSelector } from "@/components/dataset-selector"
 import { OptimizerPanel } from "@/components/optimizer-panel"
-import { TaskSwitcher } from "@/components/task-switcher"
 import { ConsoleOutput } from "@/components/console-output"
 import { NeuralBackground } from "@/components/neural-background"
 import { DatasetGenerator } from "@/components/dataset-generator"
 import { Brain, Github, BookOpen } from "lucide-react"
 
 export default function MLPDemo() {
-  const [layers, setLayers] = useState([4, 8, 8, 3])
+  const [layers, setLayers] = useState([2, 8, 8, 1])
   const [activationFn, setActivationFn] = useState("relu")
-  const [taskType, setTaskType] = useState<"binary" | "multiclass" | "regression">("multiclass")
   const [isTraining, setIsTraining] = useState(false)
-  const [dataset, setDataset] = useState("iris")
-  const [optimizer, setOptimizer] = useState("adam")
+  const [optimizer, setOptimizer] = useState<"gd" | "sgd" | "sgd_momentum" | "rmsprop" | "adam">("adam")
   const [learningRate, setLearningRate] = useState(0.01)
+  const [regularization, setRegularization] = useState<"none" | "l1" | "l2" | "elastic_net">("none")
+  const [l1Lambda, setL1Lambda] = useState(0.01)
+  const [l2Lambda, setL2Lambda] = useState(0.01)
 
   return (
     <div className="relative min-h-screen bg-background neural-grid overflow-hidden">
@@ -65,11 +64,7 @@ export default function MLPDemo() {
               <h2 className="text-lg font-semibold text-foreground mb-4 flex items-center gap-2">
                 <span className="text-primary">01</span> Data Generation
               </h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-4">
-                  <TaskSwitcher value={taskType} onChange={setTaskType} />
-                  <DatasetSelector value={dataset} onChange={setDataset} taskType={taskType} />
-                </div>
+              <div className="space-y-6">
                 <DatasetGenerator />
               </div>
             </motion.div>
@@ -91,6 +86,12 @@ export default function MLPDemo() {
                   onOptimizerChange={setOptimizer}
                   learningRate={learningRate}
                   onLearningRateChange={setLearningRate}
+                  regularization={regularization}
+                  onRegularizationChange={setRegularization}
+                  l1Lambda={l1Lambda}
+                  onL1LambdaChange={setL1Lambda}
+                  l2Lambda={l2Lambda}
+                  onL2LambdaChange={setL2Lambda}
                 />
               </div>
             </motion.div>

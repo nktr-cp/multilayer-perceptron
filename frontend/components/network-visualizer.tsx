@@ -46,6 +46,11 @@ export function NetworkVisualizer({ layers, isTraining, activationFn }: NetworkV
 
       const layerSpacing = width / (layers.length + 1)
       const maxNeurons = Math.max(...layers)
+      
+      // Different padding for top and bottom to shift network upward
+      const topPadding = 10
+      const bottomPadding = 40
+      const availableHeight = height - topPadding - bottomPadding
 
       // Draw connections
       for (let i = 0; i < layers.length - 1; i++) {
@@ -55,10 +60,10 @@ export function NetworkVisualizer({ layers, isTraining, activationFn }: NetworkV
         const nextX = layerSpacing * (i + 2)
 
         for (let j = 0; j < currentLayerSize; j++) {
-          const currentY = (height / (currentLayerSize + 1)) * (j + 1)
+          const currentY = topPadding + (availableHeight / (currentLayerSize + 1)) * (j + 1)
 
           for (let k = 0; k < nextLayerSize; k++) {
-            const nextY = (height / (nextLayerSize + 1)) * (k + 1)
+            const nextY = topPadding + (availableHeight / (nextLayerSize + 1)) * (k + 1)
 
             const weight = weights[i]?.[j]?.[k] || 0
             const opacity = Math.abs(weight) * 0.5 + 0.1
@@ -88,7 +93,7 @@ export function NetworkVisualizer({ layers, isTraining, activationFn }: NetworkV
         const x = layerSpacing * (i + 1)
 
         for (let j = 0; j < layerSize; j++) {
-          const y = (height / (layerSize + 1)) * (j + 1)
+          const y = topPadding + (availableHeight / (layerSize + 1)) * (j + 1)
 
           // Neuron glow
           const gradient = ctx.createRadialGradient(x, y, 0, x, y, 15)
@@ -130,7 +135,7 @@ export function NetworkVisualizer({ layers, isTraining, activationFn }: NetworkV
   }, [layers, weights, isTraining])
 
   return (
-    <Card className="glass-card glow-cyan p-6 h-[600px]">
+    <Card className="glass-card glow-cyan p-6 h-[550px]">
       <div className="flex items-center justify-between mb-4">
         <div>
           <h2 className="text-lg font-semibold text-foreground">Network Architecture</h2>
@@ -150,7 +155,7 @@ export function NetworkVisualizer({ layers, isTraining, activationFn }: NetworkV
         )}
       </div>
 
-      <canvas ref={canvasRef} width={800} height={500} className="w-full h-full" />
+      <canvas ref={canvasRef} width={800} height={450} className="w-full h-full" />
     </Card>
   )
 }

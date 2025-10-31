@@ -21,7 +21,15 @@ export function LayerControlPanel({
   activationFn,
   onActivationChange,
 }: LayerControlPanelProps) {
+  // Maximum 5 hidden layers (input + 5 hidden + output = 7 total)
+  const maxHiddenLayers = 5
+  const maxNeuronsPerLayer = 12
+  
   const addLayer = () => {
+    // Check if we can add more hidden layers
+    const currentHiddenLayers = layers.length - 2 // exclude input and output
+    if (currentHiddenLayers >= maxHiddenLayers) return
+    
     const newLayers = [...layers]
     newLayers.splice(layers.length - 1, 0, 8)
     onLayersChange(newLayers)
@@ -37,7 +45,7 @@ export function LayerControlPanel({
 
   const updateNeuronCount = (index: number, value: number) => {
     const newLayers = [...layers]
-    newLayers[index] = Math.max(1, Math.min(32, value))
+    newLayers[index] = Math.max(1, Math.min(maxNeuronsPerLayer, value))
     onLayersChange(newLayers)
   }
 
@@ -45,7 +53,10 @@ export function LayerControlPanel({
     <Card className="glass-card p-6">
       <div className="flex items-center gap-2 mb-4">
         <Layers className="w-5 h-5 text-primary" />
-        <h3 className="text-lg font-semibold text-foreground">Layer Control</h3>
+        <div>
+          <h3 className="text-lg font-semibold text-foreground">Layer Control</h3>
+          <p className="text-xs text-muted-foreground">Max {maxHiddenLayers} hidden layers • {maxNeuronsPerLayer} neurons per layer</p>
+        </div>
       </div>
 
       <div className="space-y-4">
@@ -67,7 +78,7 @@ export function LayerControlPanel({
                 value={neurons}
                 onChange={(e) => updateNeuronCount(index, Number.parseInt(e.target.value) || 1)}
                 min={1}
-                max={32}
+                max={maxNeuronsPerLayer}
                 className="bg-muted/50 border-border/50"
                 disabled={index === 0 || index === layers.length - 1}
               />
@@ -82,6 +93,7 @@ export function LayerControlPanel({
             variant="outline"
             size="sm"
             className="flex-1 border-primary/30 hover:bg-primary/10 hover:border-primary/50 bg-transparent"
+            disabled={layers.length - 2 >= maxHiddenLayers}
           >
             <Plus className="w-4 h-4 mr-1" />
             Add Layer
