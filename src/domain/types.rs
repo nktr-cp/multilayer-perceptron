@@ -4,45 +4,15 @@ use rand::seq::SliceRandom;
 use rand::SeedableRng;
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskKind {
   BinaryClassification,
   MultiClassification,
   Regression,
 }
 
-/// Represents the diagnosis label for breast cancer classification
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Diagnosis {
-  /// Malignant (cancerous)
-  M,
-  /// Benign (non-cancerous)
-  B,
-}
-
-impl Diagnosis {
-  pub fn to_f64(self) -> f64 {
-    match self {
-      Diagnosis::M => 1.0,
-      Diagnosis::B => 0.0,
-    }
-  }
-
-  /// Parse diagnosis from string representation
-  pub fn parse(s: &str) -> Result<Self> {
-    match s.trim() {
-      "M" => Ok(Diagnosis::M),
-      "B" => Ok(Diagnosis::B),
-      _ => Err(TensorError::InvalidValue(format!(
-        "Invalid diagnosis value: {}. Expected 'M' or 'B'",
-        s
-      ))),
-    }
-  }
-}
-
 #[derive(Debug, Clone)]
-pub struct PreprocessConfig {
+pub struct DataConfig {
   /// Whether to apply standardization (z-score normalization)
   pub standardize: bool,
   /// Whether to apply min-max normalization
@@ -51,7 +21,7 @@ pub struct PreprocessConfig {
   pub random_seed: Option<u64>,
 }
 
-impl Default for PreprocessConfig {
+impl Default for DataConfig {
   fn default() -> Self {
     Self {
       standardize: true,
@@ -61,7 +31,7 @@ impl Default for PreprocessConfig {
   }
 }
 
-pub type DataConfig = PreprocessConfig;
+pub type PreprocessConfig = DataConfig;
 
 #[derive(Debug, Clone)]
 pub struct FeatureStats {
@@ -74,7 +44,9 @@ pub struct FeatureStats {
 impl FeatureStats {
   /// Compute statistics from feature matrix
   pub fn from_features(features: &Array2<f64>) -> Self {
-    let means = features.mean_axis(Axis(0)).unwrap();
+    let means = features
+      .mean_axis(Axis(0))
+      .unwrap_or_else(|| Array1::zeros(features.ncols()));
     let stds = features.std_axis(Axis(0), 0.0);
     let mins = features.fold_axis(Axis(0), f64::INFINITY, |&acc, &x| acc.min(x));
     let maxs = features.fold_axis(Axis(0), f64::NEG_INFINITY, |&acc, &x| acc.max(x));
@@ -89,7 +61,7 @@ impl FeatureStats {
 
   /// Apply standardization to features using computed statistics
   pub fn standardize(&self, features: &mut Array2<f64>) -> Result<()> {
-    if features.shape()[1] != self.means.len() {
+    if features.ncols() != self.means.len() {
       return Err(TensorError::DimensionMismatch(
         "Feature dimension mismatch".to_string(),
       ));
@@ -107,7 +79,7 @@ impl FeatureStats {
 
   /// Apply min-max normalization to features using computed statistics
   pub fn normalize(&self, features: &mut Array2<f64>) -> Result<()> {
-    if features.shape()[1] != self.mins.len() {
+    if features.ncols() != self.mins.len() {
       return Err(TensorError::DimensionMismatch(
         "Feature dimension mismatch".to_string(),
       ));
@@ -125,52 +97,54 @@ impl FeatureStats {
   }
 }
 
-/// Raw breast cancer data record
-#[derive(Debug, Clone)]
-pub struct BreastCancerRecord {
-  pub id: u32,
-  pub diagnosis: Diagnosis,
-  pub features: Array1<f64>,
-}
-
 #[derive(Debug, Clone)]
 pub struct Dataset {
+  pub task: TaskKind,
   pub features: Array2<f64>,
-  pub labels: Array1<f64>,
-  pub ids: Vec<u32>,
+  pub targets: Array2<f64>,
+  pub sample_ids: Option<Vec<String>>,
+  pub feature_names: Option<Vec<String>>,
+  pub target_names: Option<Vec<String>>,
   pub stats: Option<FeatureStats>,
-  pub config: PreprocessConfig,
+  pub config: DataConfig,
 }
 
 impl Dataset {
-  pub fn new(config: PreprocessConfig) -> Self {
+  pub fn new(
+    task: TaskKind,
+    features: Array2<f64>,
+    targets: Array2<f64>,
+    config: DataConfig,
+  ) -> Self {
     Self {
-      features: Array2::zeros((0, 30)),
-      labels: Array1::zeros(0),
-      ids: Vec::new(),
+      task,
+      features,
+      targets,
+      sample_ids: None,
+      feature_names: None,
+      target_names: None,
       stats: None,
       config,
     }
   }
 
-  pub fn from_parts(
-    features: Array2<f64>,
-    labels: Array1<f64>,
-    ids: Vec<u32>,
-    stats: Option<FeatureStats>,
-    config: PreprocessConfig,
-  ) -> Self {
-    Self {
-      features,
-      labels,
-      ids,
-      stats,
-      config,
-    }
+  pub fn with_sample_ids(mut self, sample_ids: Vec<String>) -> Self {
+    self.sample_ids = Some(sample_ids);
+    self
+  }
+
+  pub fn with_feature_names(mut self, feature_names: Vec<String>) -> Self {
+    self.feature_names = Some(feature_names);
+    self
+  }
+
+  pub fn with_target_names(mut self, target_names: Vec<String>) -> Self {
+    self.target_names = Some(target_names);
+    self
   }
 
   pub fn len(&self) -> usize {
-    self.features.shape()[0]
+    self.features.nrows()
   }
 
   pub fn is_empty(&self) -> bool {
@@ -178,7 +152,11 @@ impl Dataset {
   }
 
   pub fn n_features(&self) -> usize {
-    self.features.shape()[1]
+    self.features.ncols()
+  }
+
+  pub fn target_dim(&self) -> usize {
+    self.targets.ncols()
   }
 
   pub fn preprocess(&mut self) -> Result<()> {
@@ -186,14 +164,14 @@ impl Dataset {
       self.stats = Some(FeatureStats::from_features(&self.features));
     }
 
-    let stats = self.stats.as_ref().unwrap();
+    if let Some(stats) = &self.stats {
+      if self.config.standardize {
+        stats.standardize(&mut self.features)?;
+      }
 
-    if self.config.standardize {
-      stats.standardize(&mut self.features)?;
-    }
-
-    if self.config.normalize {
-      stats.normalize(&mut self.features)?;
+      if self.config.normalize {
+        stats.normalize(&mut self.features)?;
+      }
     }
 
     Ok(())
@@ -218,12 +196,17 @@ impl Dataset {
       ));
     }
 
-    let n_samples = self.len();
-    let n_test = (n_samples as f64 * test_size).round() as usize;
-    let n_train = n_samples - n_test;
+    let total = self.len();
+    if total == 0 {
+      return Err(TensorError::InvalidValue(
+        "Dataset is empty; cannot split".to_string(),
+      ));
+    }
 
-    let mut indices: Vec<usize> = (0..n_samples).collect();
+    let n_test = (total as f64 * test_size).round() as usize;
+    let n_train = total.saturating_sub(n_test.max(1));
 
+    let mut indices: Vec<usize> = (0..total).collect();
     if let Some(seed) = self.config.random_seed {
       let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
       indices.shuffle(&mut rng);
@@ -235,87 +218,91 @@ impl Dataset {
     let train_indices = &indices[..n_train];
     let test_indices = &indices[n_train..];
 
-    let mut train_features = Array2::zeros((n_train, self.n_features()));
-    let mut train_labels = Array1::zeros(n_train);
-    let mut train_ids = Vec::with_capacity(n_train);
-
-    for (i, &idx) in train_indices.iter().enumerate() {
-      train_features.row_mut(i).assign(&self.features.row(idx));
-      train_labels[i] = self.labels[idx];
-      train_ids.push(self.ids[idx]);
-    }
-
-    let mut test_features = Array2::zeros((n_test, self.n_features()));
-    let mut test_labels = Array1::zeros(n_test);
-    let mut test_ids = Vec::with_capacity(n_test);
-
-    for (i, &idx) in test_indices.iter().enumerate() {
-      test_features.row_mut(i).assign(&self.features.row(idx));
-      test_labels[i] = self.labels[idx];
-      test_ids.push(self.ids[idx]);
-    }
-
-    let train_dataset = Dataset {
-      features: train_features,
-      labels: train_labels,
-      ids: train_ids,
-      stats: self.stats.clone(),
-      config: self.config.clone(),
-    };
-
-    let test_dataset = Dataset {
-      features: test_features,
-      labels: test_labels,
-      ids: test_ids,
-      stats: self.stats.clone(),
-      config: self.config.clone(),
-    };
+    let train_dataset = self.subset(train_indices)?;
+    let test_dataset = self.subset(test_indices)?;
 
     Ok((train_dataset, test_dataset))
   }
 
-  pub fn get_stats(&self) -> Option<&FeatureStats> {
-    self.stats.as_ref()
-  }
-
   pub fn to_tensors(&self) -> Result<(Tensor, Tensor)> {
     let features_tensor = Tensor::from_array2(self.features.clone())?;
-    let labels_tensor = Tensor::from_array1(self.labels.clone())?;
-    Ok((features_tensor, labels_tensor))
+    let targets_tensor = Tensor::from_array2(self.targets.clone())?;
+    Ok((features_tensor, targets_tensor))
   }
 
   pub fn subset(&self, indices: &[usize]) -> Result<Dataset> {
-    if indices.iter().any(|&i| i >= self.len()) {
-      return Err(TensorError::InvalidValue("Index out of bounds".to_string()));
-    }
-
-    let n_subset = indices.len();
-    let mut features = Array2::zeros((n_subset, self.n_features()));
-    let mut labels = Array1::zeros(n_subset);
-    let mut ids = Vec::with_capacity(n_subset);
-
-    for (i, &idx) in indices.iter().enumerate() {
-      features.row_mut(i).assign(&self.features.row(idx));
-      labels[i] = self.labels[idx];
-      ids.push(self.ids[idx]);
-    }
+    let (sample_features, sample_targets) = self.select_rows(indices)?;
+    let sample_ids = self.sample_ids.as_ref().map(|ids| {
+      indices
+        .iter()
+        .map(|&i| ids.get(i).cloned().unwrap_or_default())
+        .collect()
+    });
 
     Ok(Dataset {
-      features,
-      labels,
-      ids,
+      task: self.task,
+      features: sample_features,
+      targets: sample_targets,
+      sample_ids,
+      feature_names: self.feature_names.clone(),
+      target_names: self.target_names.clone(),
       stats: self.stats.clone(),
       config: self.config.clone(),
     })
   }
 
-  pub fn class_distribution(&self) -> HashMap<String, usize> {
-    let mut distribution = HashMap::new();
-    for &label in &self.labels {
-      let class = if label > 0.5 { "M" } else { "B" };
-      *distribution.entry(class.to_string()).or_insert(0) += 1;
+  pub fn stats(&self) -> Option<&FeatureStats> {
+    self.stats.as_ref()
+  }
+
+  pub fn class_distribution(&self) -> Option<HashMap<String, usize>> {
+    match self.task {
+      TaskKind::Regression => None,
+      TaskKind::BinaryClassification | TaskKind::MultiClassification => {
+        let mut distribution = HashMap::new();
+        if self.target_dim() == 1 {
+          for &value in self.targets.column(0).iter() {
+            let class_label = format!("{}", value.round());
+            *distribution.entry(class_label).or_insert(0) += 1;
+          }
+        } else {
+          for row in self.targets.rows() {
+            if let Some((class_idx, _)) = row
+              .iter()
+              .enumerate()
+              .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            {
+              let class_label = class_idx.to_string();
+              *distribution.entry(class_label).or_insert(0) += 1;
+            }
+          }
+        }
+        Some(distribution)
+      }
     }
-    distribution
+  }
+
+  fn select_rows(&self, indices: &[usize]) -> Result<(Array2<f64>, Array2<f64>)> {
+    let n_samples = self.len();
+    let feature_dim = self.n_features();
+    let target_dim = self.target_dim();
+
+    let mut features = Array2::zeros((indices.len(), feature_dim));
+    let mut targets = Array2::zeros((indices.len(), target_dim));
+
+    for (row_idx, &source_idx) in indices.iter().enumerate() {
+      if source_idx >= n_samples {
+        return Err(TensorError::InvalidValue("Index out of bounds".to_string()));
+      }
+      features
+        .row_mut(row_idx)
+        .assign(&self.features.row(source_idx));
+      targets
+        .row_mut(row_idx)
+        .assign(&self.targets.row(source_idx));
+    }
+
+    Ok((features, targets))
   }
 }
 
@@ -343,7 +330,7 @@ impl DataLoader {
 
     Self {
       dataset,
-      batch_size,
+      batch_size: batch_size.max(1),
       shuffle,
       rng,
       indices,
@@ -360,7 +347,7 @@ impl DataLoader {
   }
 
   pub fn num_batches(&self) -> usize {
-    self.dataset.len().div_ceil(self.batch_size)
+    self.dataset.len().div_ceil(self.batch_size.max(1)).max(1)
   }
 
   pub fn reset(&mut self) {
@@ -378,14 +365,16 @@ impl DataLoader {
     let end_pos = (self.current_pos + self.batch_size).min(self.dataset.len());
     let batch_indices = &self.indices[self.current_pos..end_pos];
 
-    let batch_dataset = match self.dataset.subset(batch_indices) {
-      Ok(dataset) => dataset,
-      Err(e) => return Some(Err(e)),
+    let (features, targets) = match self.dataset.select_rows(batch_indices) {
+      Ok(data) => data,
+      Err(err) => return Some(Err(err)),
     };
 
     self.current_pos = end_pos;
 
-    Some(batch_dataset.to_tensors())
+    Some(
+      Tensor::from_array2(features).and_then(|fx| Tensor::from_array2(targets).map(|ty| (fx, ty))),
+    )
   }
 
   pub fn batches(&mut self) -> DataLoaderIterator<'_> {
@@ -414,143 +403,72 @@ impl Iterator for DataLoaderIterator<'_> {
   }
 }
 
-pub mod utils {
-  use super::*;
-
-  pub fn stratified_split(
-    dataset: &Dataset,
-    test_size: f64,
-    random_seed: Option<u64>,
-  ) -> Result<(Dataset, Dataset)> {
-    if test_size <= 0.0 || test_size >= 1.0 {
-      return Err(TensorError::InvalidValue(
-        "Test size must be between 0 and 1".to_string(),
-      ));
-    }
-
-    let mut class_0_indices = Vec::new(); // Benign (B)
-    let mut class_1_indices = Vec::new(); // Malignant (M)
-
-    for (i, &label) in dataset.labels.iter().enumerate() {
-      if label > 0.5 {
-        class_1_indices.push(i);
-      } else {
-        class_0_indices.push(i);
-      }
-    }
-
-    if let Some(seed) = random_seed {
-      let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-      class_0_indices.shuffle(&mut rng);
-      class_1_indices.shuffle(&mut rng);
-    } else {
-      let mut rng = rand::thread_rng();
-      class_0_indices.shuffle(&mut rng);
-      class_1_indices.shuffle(&mut rng);
-    }
-
-    let n_test_0 = (class_0_indices.len() as f64 * test_size).round() as usize;
-    let n_test_1 = (class_1_indices.len() as f64 * test_size).round() as usize;
-
-    let mut train_indices = Vec::new();
-    let mut test_indices = Vec::new();
-
-    train_indices.extend_from_slice(&class_0_indices[n_test_0..]);
-    train_indices.extend_from_slice(&class_1_indices[n_test_1..]);
-
-    test_indices.extend_from_slice(&class_0_indices[..n_test_0]);
-    test_indices.extend_from_slice(&class_1_indices[..n_test_1]);
-
-    if let Some(seed) = random_seed {
-      let mut rng = rand::rngs::StdRng::seed_from_u64(seed + 1); // Different seed for final shuffle
-      train_indices.shuffle(&mut rng);
-      test_indices.shuffle(&mut rng);
-    } else {
-      let mut rng = rand::thread_rng();
-      train_indices.shuffle(&mut rng);
-      test_indices.shuffle(&mut rng);
-    }
-
-    let train_dataset = dataset.subset(&train_indices)?;
-    let test_dataset = dataset.subset(&test_indices)?;
-
-    Ok((train_dataset, test_dataset))
-  }
-
-  pub fn print_dataset_info(dataset: &Dataset, name: &str) {
-    println!("=== {} Dataset Info ===", name);
-    println!("Number of samples: {}", dataset.len());
-    println!("Number of features: {}", dataset.n_features());
-
-    let distribution = dataset.class_distribution();
-    println!("Class distribution:");
-    for (class, count) in &distribution {
-      let percentage = (*count as f64 / dataset.len() as f64) * 100.0;
-      println!("  {}: {} ({:.1}%)", class, count, percentage);
-    }
-
-    if let Some(stats) = dataset.get_stats() {
-      println!("Feature statistics (first 5 features):");
-      for i in 0..5.min(stats.means.len()) {
-        println!(
-          "  Feature {}: mean={:.3}, std={:.3}, min={:.3}, max={:.3}",
-          i, stats.means[i], stats.stds[i], stats.mins[i], stats.maxs[i]
-        );
-      }
-    }
-    println!();
-  }
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;
   use approx::assert_abs_diff_eq;
 
-  #[test]
-  fn test_diagnosis_conversion() {
-    assert_eq!(Diagnosis::M.to_f64(), 1.0);
-    assert_eq!(Diagnosis::B.to_f64(), 0.0);
-
-    assert_eq!(Diagnosis::parse("M").unwrap(), Diagnosis::M);
-    assert_eq!(Diagnosis::parse("B").unwrap(), Diagnosis::B);
-    assert!(Diagnosis::parse("X").is_err());
+  fn dummy_dataset(task: TaskKind) -> Dataset {
+    let features =
+      Array2::from_shape_vec((4, 2), vec![0.0, 1.0, 1.0, 0.0, -1.0, 2.0, 2.0, -2.0]).unwrap();
+    let targets = Array2::from_shape_vec((4, 1), vec![0.0, 1.0, 1.0, 0.0]).unwrap();
+    Dataset::new(task, features, targets, DataConfig::default())
   }
 
   #[test]
-  fn test_feature_stats() {
-    let features = Array2::from_shape_vec((3, 2), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
+  fn test_dataset_preprocess() {
+    let mut dataset = dummy_dataset(TaskKind::Regression);
+    dataset.preprocess().unwrap();
+    assert!(dataset.stats.is_some());
+  }
+
+  #[test]
+  fn test_dataset_train_test_split() {
+    let dataset = dummy_dataset(TaskKind::BinaryClassification);
+    let (train, test) = dataset.train_test_split(0.25).unwrap();
+    assert_eq!(train.len(), 3);
+    assert_eq!(test.len(), 1);
+    assert_eq!(train.n_features(), 2);
+  }
+
+  #[test]
+  fn test_dataset_subset() {
+    let dataset = dummy_dataset(TaskKind::BinaryClassification).with_sample_ids(vec![
+      "a".into(),
+      "b".into(),
+      "c".into(),
+      "d".into(),
+    ]);
+    let subset = dataset.subset(&[1, 3]).unwrap();
+    assert_eq!(subset.len(), 2);
+    assert_eq!(subset.sample_ids.unwrap(), vec!["b", "d"]);
+  }
+
+  #[test]
+  fn test_class_distribution_binary() {
+    let dataset = dummy_dataset(TaskKind::BinaryClassification);
+    let distribution = dataset.class_distribution().unwrap();
+    assert_eq!(distribution.get("0").copied().unwrap_or_default(), 2);
+    assert_eq!(distribution.get("1").copied().unwrap_or_default(), 2);
+  }
+
+  #[test]
+  fn test_dataloader_iteration() {
+    let dataset = dummy_dataset(TaskKind::Regression);
+    let mut loader = DataLoader::new(dataset, 2, false, Some(42));
+    let mut batches = loader.batches();
+    let (features, targets) = batches.next().unwrap().unwrap();
+    assert_eq!(features.shape(), (2, 2));
+    assert_eq!(targets.shape(), (2, 1));
+  }
+
+  #[test]
+  fn test_feature_stats_normalize() {
+    let mut features =
+      Array2::from_shape_vec((2, 2), vec![1.0, 2.0, 3.0, 4.0]).expect("shape should match");
     let stats = FeatureStats::from_features(&features);
-
-    assert_abs_diff_eq!(stats.means[0], 3.0, epsilon = 1e-10);
-    assert_abs_diff_eq!(stats.means[1], 4.0, epsilon = 1e-10);
-  }
-
-  #[test]
-  fn test_dataset_creation() {
-    let config = PreprocessConfig::default();
-    let dataset = Dataset::new(config);
-    assert_eq!(dataset.len(), 0);
-    assert!(dataset.is_empty());
-    assert_eq!(dataset.n_features(), 30);
-  }
-
-  #[test]
-  fn test_train_test_split() {
-    let features = Array2::zeros((10, 30));
-    let labels = Array1::from_vec((0..10).map(|x| x as f64).collect());
-    let ids = (0..10).map(|x| x as u32).collect();
-
-    let dataset = Dataset {
-      features,
-      labels,
-      ids,
-      stats: None,
-      config: PreprocessConfig::default(),
-    };
-
-    let (train, test) = dataset.train_test_split(0.3).unwrap();
-    assert_eq!(train.len(), 7);
-    assert_eq!(test.len(), 3);
+    stats.normalize(&mut features).unwrap();
+    assert_abs_diff_eq!(features[[0, 0]], 0.0, epsilon = 1e-9);
+    assert_abs_diff_eq!(features[[1, 1]], 1.0, epsilon = 1e-9);
   }
 }

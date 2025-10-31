@@ -59,7 +59,7 @@ impl BinaryCrossEntropy {
   ///
   /// # Examples
   /// ```
-/// use multilayer_perceptron::prelude::*;
+  /// use multilayer_perceptron::prelude::*;
   ///
   /// let loss_fn = BinaryCrossEntropy::new();
   /// ```
@@ -74,7 +74,7 @@ impl BinaryCrossEntropy {
   ///
   /// # Examples
   /// ```
-/// use multilayer_perceptron::prelude::*;
+  /// use multilayer_perceptron::prelude::*;
   ///
   /// let loss_fn = BinaryCrossEntropy::with_epsilon(1e-10);
   /// ```
@@ -193,7 +193,7 @@ impl MeanSquaredError {
   ///
   /// # Examples
   /// ```
-/// use multilayer_perceptron::prelude::*;
+  /// use multilayer_perceptron::prelude::*;
   ///
   /// let loss_fn = MeanSquaredError::new();
   /// ```

@@ -139,6 +139,10 @@ impl DenseLayer {
     )
   }
 
+  pub fn set_activation(&mut self, activation: Activation) {
+    self.activation = activation;
+  }
+
   fn initialize_params(
     input_size: usize,
     output_size: usize,

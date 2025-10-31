@@ -78,6 +78,14 @@ impl Sequential {
     self.add(DenseLayer::softmax(input_size, output_size))
   }
 
+  pub fn set_output_activation(&mut self, activation: Activation) {
+    if let Some(layer) = self.layers.last_mut() {
+      if let Some(dense_layer) = layer.as_any_mut().downcast_mut::<DenseLayer>() {
+        dense_layer.set_activation(activation);
+      }
+    }
+  }
+
   /// Set up computation graph for the model
   pub fn with_graph(mut self, graph: std::rc::Rc<std::cell::RefCell<ComputationGraph>>) -> Self {
     self.graph = Some(graph.clone());

@@ -62,7 +62,7 @@ impl SGD {
   ///
   /// # Examples
   /// ```
-/// use multilayer_perceptron::prelude::*;
+  /// use multilayer_perceptron::prelude::*;
   ///
   /// let optimizer = SGD::new(0.01);
   /// assert_eq!(optimizer.learning_rate(), 0.01);
@@ -139,7 +139,7 @@ impl SGDMomentum {
   ///
   /// # Examples
   /// ```
-/// use multilayer_perceptron::prelude::*;
+  /// use multilayer_perceptron::prelude::*;
   ///
   /// let optimizer = SGDMomentum::new(0.01, 0.9);
   /// assert_eq!(optimizer.learning_rate(), 0.01);
