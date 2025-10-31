@@ -551,7 +551,7 @@ mod tests {
 pub struct RegularizationConfig {
   /// L1 regularization strength (lambda1)
   pub l1_lambda: f64,
-  /// L2 regularization strength (lambda2)  
+  /// L2 regularization strength (lambda2)
   pub l2_lambda: f64,
   /// Whether to apply regularization to bias terms
   pub apply_to_bias: bool,
@@ -636,6 +636,218 @@ impl RegularizationConfig {
   pub fn has_l2(&self) -> bool {
     self.l2_lambda > 0.0
   }
+
+  /// Compute the L1 regularization penalty for the provided parameters.
+  pub(crate) fn compute_l1_regularization(
+    &self,
+    weights: &[&Tensor],
+    biases: &[&Tensor],
+  ) -> Result<Tensor> {
+    if !self.has_l1() {
+      return Ok(Tensor::zeros(1, 1));
+    }
+
+    let mut l1_sum = 0.0;
+
+    // L1 penalty for weights
+    for weight_tensor in weights {
+      for i in 0..weight_tensor.data.nrows() {
+        for j in 0..weight_tensor.data.ncols() {
+          l1_sum += weight_tensor.data[[i, j]].abs();
+        }
+      }
+    }
+
+    // L1 penalty for biases (if enabled)
+    if self.apply_to_bias {
+      for bias_tensor in biases {
+        for i in 0..bias_tensor.data.nrows() {
+          for j in 0..bias_tensor.data.ncols() {
+            l1_sum += bias_tensor.data[[i, j]].abs();
+          }
+        }
+      }
+    }
+
+    let regularization_value = self.l1_lambda * l1_sum;
+    Tensor::from_scalar(regularization_value)
+  }
+
+  /// Compute the L2 regularization penalty for the provided parameters.
+  pub(crate) fn compute_l2_regularization(
+    &self,
+    weights: &[&Tensor],
+    biases: &[&Tensor],
+  ) -> Result<Tensor> {
+    if !self.has_l2() {
+      return Ok(Tensor::zeros(1, 1));
+    }
+
+    let mut l2_sum = 0.0;
+
+    // L2 penalty for weights
+    for weight_tensor in weights {
+      for i in 0..weight_tensor.data.nrows() {
+        for j in 0..weight_tensor.data.ncols() {
+          let w = weight_tensor.data[[i, j]];
+          l2_sum += w * w;
+        }
+      }
+    }
+
+    // L2 penalty for biases (if enabled)
+    if self.apply_to_bias {
+      for bias_tensor in biases {
+        for i in 0..bias_tensor.data.nrows() {
+          for j in 0..bias_tensor.data.ncols() {
+            let b = bias_tensor.data[[i, j]];
+            l2_sum += b * b;
+          }
+        }
+      }
+    }
+
+    let regularization_value = self.l2_lambda * l2_sum;
+    Tensor::from_scalar(regularization_value)
+  }
+
+  /// Compute the L1 regularization gradients for the provided parameters.
+  pub(crate) fn compute_l1_gradient(
+    &self,
+    weights: &[&Tensor],
+    biases: &[&Tensor],
+  ) -> Vec<(Tensor, Tensor)> {
+    if !self.has_l1() {
+      return weights
+        .iter()
+        .zip(biases.iter())
+        .map(|(w, b)| {
+          (
+            Tensor::zeros_like(w).unwrap(),
+            Tensor::zeros_like(b).unwrap(),
+          )
+        })
+        .collect();
+    }
+
+    let mut gradients = Vec::new();
+
+    for (weight_tensor, bias_tensor) in weights.iter().zip(biases.iter()) {
+      // Weight gradients
+      let mut weight_grad_data = weight_tensor.data.clone();
+      for i in 0..weight_grad_data.nrows() {
+        for j in 0..weight_grad_data.ncols() {
+          let w = weight_tensor.data[[i, j]];
+          weight_grad_data[[i, j]] = self.l1_lambda * w.signum();
+        }
+      }
+      let weight_grad = Tensor::from_data(weight_grad_data).unwrap();
+
+      // Bias gradients
+      let bias_grad = if self.apply_to_bias {
+        let mut bias_grad_data = bias_tensor.data.clone();
+        for i in 0..bias_grad_data.nrows() {
+          for j in 0..bias_grad_data.ncols() {
+            let b = bias_tensor.data[[i, j]];
+            bias_grad_data[[i, j]] = self.l1_lambda * b.signum();
+          }
+        }
+        Tensor::from_data(bias_grad_data).unwrap()
+      } else {
+        Tensor::zeros_like(bias_tensor).unwrap()
+      };
+
+      gradients.push((weight_grad, bias_grad));
+    }
+
+    gradients
+  }
+
+  /// Compute the L2 regularization gradients for the provided parameters.
+  pub(crate) fn compute_l2_gradient(
+    &self,
+    weights: &[&Tensor],
+    biases: &[&Tensor],
+  ) -> Vec<(Tensor, Tensor)> {
+    if !self.has_l2() {
+      return weights
+        .iter()
+        .zip(biases.iter())
+        .map(|(w, b)| {
+          (
+            Tensor::zeros_like(w).unwrap(),
+            Tensor::zeros_like(b).unwrap(),
+          )
+        })
+        .collect();
+    }
+
+    let mut gradients = Vec::new();
+
+    for (weight_tensor, bias_tensor) in weights.iter().zip(biases.iter()) {
+      // Weight gradients: 2λ₂ * w
+      let weight_grad = weight_tensor.mul_scalar(2.0 * self.l2_lambda).unwrap();
+
+      // Bias gradients
+      let bias_grad = if self.apply_to_bias {
+        bias_tensor.mul_scalar(2.0 * self.l2_lambda).unwrap()
+      } else {
+        Tensor::zeros_like(bias_tensor).unwrap()
+      };
+
+      gradients.push((weight_grad, bias_grad));
+    }
+
+    gradients
+  }
+
+  /// Compute the total regularization penalty (L1 + L2) for a model.
+  pub(crate) fn compute_regularization_penalty<M: RegularizableModel>(
+    &self,
+    model: &M,
+  ) -> Result<Tensor> {
+    if !self.is_enabled() {
+      return Ok(Tensor::zeros(1, 1));
+    }
+
+    let weights = model.weight_tensors();
+    let biases = model.bias_tensors();
+
+    let l1 = self.compute_l1_regularization(&weights, &biases)?;
+    let l2 = self.compute_l2_regularization(&weights, &biases)?;
+
+    l1.add(&l2)
+  }
+
+  /// Add regularization gradients to the model's parameters.
+  pub(crate) fn add_regularization_gradients<M: RegularizableModel>(
+    &self,
+    model: &mut M,
+  ) -> Result<()> {
+    if !self.is_enabled() {
+      return Ok(());
+    }
+
+    let weights = model.weight_tensors();
+    let biases = model.bias_tensors();
+
+    let l1_grads = self.compute_l1_gradient(&weights, &biases);
+    let l2_grads = self.compute_l2_gradient(&weights, &biases);
+
+    let mut combined_weight_grads = Vec::new();
+    let mut combined_bias_grads = Vec::new();
+
+    for ((l1_w, l1_b), (l2_w, l2_b)) in l1_grads.into_iter().zip(l2_grads.into_iter()) {
+      let combined_w = l1_w.add(&l2_w)?;
+      let combined_b = l1_b.add(&l2_b)?;
+      combined_weight_grads.push(combined_w);
+      combined_bias_grads.push(combined_b);
+    }
+
+    model.add_regularization_gradients(combined_weight_grads, combined_bias_grads);
+
+    Ok(())
+  }
 }
 
 impl Default for RegularizationConfig {
@@ -701,164 +913,6 @@ impl<L: Loss> RegularizedLoss<L> {
   pub fn config(&self) -> &RegularizationConfig {
     &self.config
   }
-
-  /// Compute L1 regularization term
-  ///
-  /// L1 regularization: λ₁ * Σ|wᵢⱼ|
-  fn compute_l1_regularization(&self, weights: &[&Tensor], biases: &[&Tensor]) -> Result<Tensor> {
-    if !self.config.has_l1() {
-      return Ok(Tensor::zeros(1, 1));
-    }
-
-    let mut l1_sum = 0.0;
-
-    // L1 penalty for weights
-    for weight_tensor in weights {
-      for i in 0..weight_tensor.data.nrows() {
-        for j in 0..weight_tensor.data.ncols() {
-          l1_sum += weight_tensor.data[[i, j]].abs();
-        }
-      }
-    }
-
-    // L1 penalty for biases (if enabled)
-    if self.config.apply_to_bias {
-      for bias_tensor in biases {
-        for i in 0..bias_tensor.data.nrows() {
-          for j in 0..bias_tensor.data.ncols() {
-            l1_sum += bias_tensor.data[[i, j]].abs();
-          }
-        }
-      }
-    }
-
-    let regularization_value = self.config.l1_lambda * l1_sum;
-    Tensor::from_scalar(regularization_value)
-  }
-
-  /// Compute L2 regularization term
-  ///
-  /// L2 regularization: λ₂ * Σwᵢⱼ²
-  fn compute_l2_regularization(&self, weights: &[&Tensor], biases: &[&Tensor]) -> Result<Tensor> {
-    if !self.config.has_l2() {
-      return Ok(Tensor::zeros(1, 1));
-    }
-
-    let mut l2_sum = 0.0;
-
-    // L2 penalty for weights
-    for weight_tensor in weights {
-      for i in 0..weight_tensor.data.nrows() {
-        for j in 0..weight_tensor.data.ncols() {
-          let w = weight_tensor.data[[i, j]];
-          l2_sum += w * w;
-        }
-      }
-    }
-
-    // L2 penalty for biases (if enabled)
-    if self.config.apply_to_bias {
-      for bias_tensor in biases {
-        for i in 0..bias_tensor.data.nrows() {
-          for j in 0..bias_tensor.data.ncols() {
-            let b = bias_tensor.data[[i, j]];
-            l2_sum += b * b;
-          }
-        }
-      }
-    }
-
-    let regularization_value = self.config.l2_lambda * l2_sum;
-    Tensor::from_scalar(regularization_value)
-  }
-
-  /// Compute L1 regularization gradient
-  ///
-  /// ∂R_L1/∂wᵢⱼ = λ₁ * sign(wᵢⱼ)
-  fn compute_l1_gradient(&self, weights: &[&Tensor], biases: &[&Tensor]) -> Vec<(Tensor, Tensor)> {
-    if !self.config.has_l1() {
-      return weights
-        .iter()
-        .zip(biases.iter())
-        .map(|(w, b)| {
-          (
-            Tensor::zeros_like(w).unwrap(),
-            Tensor::zeros_like(b).unwrap(),
-          )
-        })
-        .collect();
-    }
-
-    let mut gradients = Vec::new();
-
-    for (weight_tensor, bias_tensor) in weights.iter().zip(biases.iter()) {
-      // Weight gradients
-      let mut weight_grad_data = weight_tensor.data.clone();
-      for i in 0..weight_grad_data.nrows() {
-        for j in 0..weight_grad_data.ncols() {
-          let w = weight_tensor.data[[i, j]];
-          weight_grad_data[[i, j]] = self.config.l1_lambda * w.signum();
-        }
-      }
-      let weight_grad = Tensor::from_data(weight_grad_data).unwrap();
-
-      // Bias gradients
-      let bias_grad = if self.config.apply_to_bias {
-        let mut bias_grad_data = bias_tensor.data.clone();
-        for i in 0..bias_grad_data.nrows() {
-          for j in 0..bias_grad_data.ncols() {
-            let b = bias_tensor.data[[i, j]];
-            bias_grad_data[[i, j]] = self.config.l1_lambda * b.signum();
-          }
-        }
-        Tensor::from_data(bias_grad_data).unwrap()
-      } else {
-        Tensor::zeros_like(bias_tensor).unwrap()
-      };
-
-      gradients.push((weight_grad, bias_grad));
-    }
-
-    gradients
-  }
-
-  /// Compute L2 regularization gradient
-  ///
-  /// ∂R_L2/∂wᵢⱼ = 2λ₂ * wᵢⱼ
-  fn compute_l2_gradient(&self, weights: &[&Tensor], biases: &[&Tensor]) -> Vec<(Tensor, Tensor)> {
-    if !self.config.has_l2() {
-      return weights
-        .iter()
-        .zip(biases.iter())
-        .map(|(w, b)| {
-          (
-            Tensor::zeros_like(w).unwrap(),
-            Tensor::zeros_like(b).unwrap(),
-          )
-        })
-        .collect();
-    }
-
-    let mut gradients = Vec::new();
-
-    for (weight_tensor, bias_tensor) in weights.iter().zip(biases.iter()) {
-      // Weight gradients: 2λ₂ * w
-      let weight_grad = weight_tensor
-        .mul_scalar(2.0 * self.config.l2_lambda)
-        .unwrap();
-
-      // Bias gradients
-      let bias_grad = if self.config.apply_to_bias {
-        bias_tensor.mul_scalar(2.0 * self.config.l2_lambda).unwrap()
-      } else {
-        Tensor::zeros_like(bias_tensor).unwrap()
-      };
-
-      gradients.push((weight_grad, bias_grad));
-    }
-
-    gradients
-  }
 }
 
 /// Trait for models that can provide weight parameters for regularization
@@ -873,18 +927,26 @@ pub trait RegularizableModel {
   fn add_regularization_gradients(&mut self, weight_grads: Vec<Tensor>, bias_grads: Vec<Tensor>);
 }
 
-/// Loss implementation that requires access to model weights for regularization
+/// Loss trait implementation for RegularizedLoss - DO NOT USE DIRECTLY
+///
+/// This implementation exists only for trait compatibility but will panic when used.
+/// RegularizedLoss requires model parameters for regularization computation.
+/// Use `compute_loss` and `compute_gradients` methods instead.
 impl<L: Loss> Loss for RegularizedLoss<L> {
-  fn forward(&self, predictions: &Tensor, targets: &Tensor) -> Result<Tensor> {
-    // Note: This forward method only computes the base loss
-    // The regularization terms need to be added separately using forward_with_model
-    self.base_loss.forward(predictions, targets)
+  /// DO NOT USE: Use `compute_loss` method instead
+  fn forward(&self, _predictions: &Tensor, _targets: &Tensor) -> Result<Tensor> {
+    panic!(
+      "RegularizedLoss::forward does not include regularization terms. \
+       Use RegularizedLoss::compute_loss(predictions, targets, model) instead."
+    );
   }
 
-  fn backward(&self, predictions: &Tensor, targets: &Tensor) -> Result<Tensor> {
-    // Note: This backward method only computes the base loss gradient
-    // The regularization gradients need to be added separately using backward_with_model
-    self.base_loss.backward(predictions, targets)
+  /// DO NOT USE: Use `compute_gradients` method instead  
+  fn backward(&self, _predictions: &Tensor, _targets: &Tensor) -> Result<Tensor> {
+    panic!(
+      "RegularizedLoss::backward does not include regularization gradients. \
+       Use RegularizedLoss::compute_gradients(predictions, targets, model) instead."
+    );
   }
 
   fn name(&self) -> &'static str {
@@ -894,10 +956,19 @@ impl<L: Loss> Loss for RegularizedLoss<L> {
 
 impl<L: Loss> RegularizedLoss<L> {
   /// Forward pass with regularization terms
+  /// Compute the total regularized loss including L1/L2 penalties
   ///
   /// This computes the total loss including regularization:
   /// L_total = L_base + R_L1 + R_L2
-  pub fn forward_with_model<M: RegularizableModel>(
+  ///
+  /// # Arguments
+  /// * `predictions` - Model predictions
+  /// * `targets` - Target values
+  /// * `model` - Model implementing RegularizableModel for parameter access
+  ///
+  /// # Returns
+  /// Total loss including base loss and regularization terms
+  pub fn compute_loss<M: RegularizableModel>(
     &self,
     predictions: &Tensor,
     targets: &Tensor,
@@ -910,60 +981,60 @@ impl<L: Loss> RegularizedLoss<L> {
       return Ok(base_loss);
     }
 
-    // Get model parameters
-    let weights = model.weight_tensors();
-    let biases = model.bias_tensors();
-
-    // Compute regularization terms
-    let l1_reg = self.compute_l1_regularization(&weights, &biases)?;
-    let l2_reg = self.compute_l2_regularization(&weights, &biases)?;
-
-    // Total loss = base loss + L1 + L2
-    let mut total_loss = base_loss.add(&l1_reg)?;
-    total_loss = total_loss.add(&l2_reg)?;
-
-    Ok(total_loss)
+    let penalty = self.config.compute_regularization_penalty(model)?;
+    base_loss.add(&penalty)
   }
 
-  /// Backward pass with regularization gradients
+  /// Add regularization gradients to the model's existing parameter gradients
   ///
-  /// This computes gradients and adds regularization gradients to the model
+  /// This assumes that the base loss gradients have already been computed
+  /// and are present in the model's parameter gradients. This method adds
+  /// the regularization gradients on top of the existing gradients.
+  ///
+  /// # Arguments
+  /// * `predictions` - Model predictions (unused, kept for API consistency)
+  /// * `targets` - Target values (unused, kept for API consistency)
+  /// * `model` - Mutable model to add regularization gradients to
+  ///
+  /// # Returns
+  /// Empty tensor (regularization doesn't contribute to prediction gradients)
+  pub fn compute_gradients<M: RegularizableModel>(
+    &self,
+    _predictions: &Tensor,
+    _targets: &Tensor,
+    model: &mut M,
+  ) -> Result<Tensor> {
+    if !self.config.is_enabled() {
+      return Ok(Tensor::zeros(1, 1));
+    }
+
+    self.config.add_regularization_gradients(model)?;
+
+    Ok(Tensor::zeros(1, 1))
+  }
+
+  /// Alias for `compute_loss` for backward compatibility
+  ///
+  /// **Deprecated:** Use `compute_loss` instead
+  pub fn forward_with_model<M: RegularizableModel>(
+    &self,
+    predictions: &Tensor,
+    targets: &Tensor,
+    model: &M,
+  ) -> Result<Tensor> {
+    self.compute_loss(predictions, targets, model)
+  }
+
+  /// Alias for `compute_gradients` for backward compatibility
+  ///
+  /// **Deprecated:** Use `compute_gradients` instead
   pub fn backward_with_model<M: RegularizableModel>(
     &self,
     predictions: &Tensor,
     targets: &Tensor,
     model: &mut M,
   ) -> Result<Tensor> {
-    // Compute base gradient
-    let base_grad = self.base_loss.backward(predictions, targets)?;
-
-    if !self.config.is_enabled() {
-      return Ok(base_grad);
-    }
-
-    // Get model parameters
-    let weights = model.weight_tensors();
-    let biases = model.bias_tensors();
-
-    // Compute regularization gradients
-    let l1_grads = self.compute_l1_gradient(&weights, &biases);
-    let l2_grads = self.compute_l2_gradient(&weights, &biases);
-
-    // Combine L1 and L2 gradients
-    let mut combined_weight_grads = Vec::new();
-    let mut combined_bias_grads = Vec::new();
-
-    for ((l1_w, l1_b), (l2_w, l2_b)) in l1_grads.into_iter().zip(l2_grads.into_iter()) {
-      let combined_w = l1_w.add(&l2_w)?;
-      let combined_b = l1_b.add(&l2_b)?;
-      combined_weight_grads.push(combined_w);
-      combined_bias_grads.push(combined_b);
-    }
-
-    // Add regularization gradients to model
-    model.add_regularization_gradients(combined_weight_grads, combined_bias_grads);
-
-    Ok(base_grad)
+    self.compute_gradients(predictions, targets, model)
   }
 }
 
@@ -1082,6 +1153,7 @@ mod regularization_tests {
     let biases = model.bias_tensors();
 
     let l1_reg = reg_loss
+      .config()
       .compute_l1_regularization(&weights, &biases)
       .unwrap();
 
@@ -1100,6 +1172,7 @@ mod regularization_tests {
     let biases = model.bias_tensors();
 
     let l2_reg = reg_loss
+      .config()
       .compute_l2_regularization(&weights, &biases)
       .unwrap();
 
@@ -1118,6 +1191,7 @@ mod regularization_tests {
     let biases = model.bias_tensors();
 
     let l1_reg = reg_loss
+      .config()
       .compute_l1_regularization(&weights, &biases)
       .unwrap();
 
@@ -1137,9 +1211,11 @@ mod regularization_tests {
     let biases = model.bias_tensors();
 
     let l1_reg = reg_loss
+      .config()
       .compute_l1_regularization(&weights, &biases)
       .unwrap();
     let l2_reg = reg_loss
+      .config()
       .compute_l2_regularization(&weights, &biases)
       .unwrap();
 
@@ -1149,7 +1225,7 @@ mod regularization_tests {
   }
 
   #[test]
-  fn test_regularized_loss_forward_with_model() {
+  fn test_regularized_loss_compute_loss() {
     let base_loss = BinaryCrossEntropy::new();
     let config = RegularizationConfig::l2_only(0.1);
     let reg_loss = RegularizedLoss::new(base_loss, config);
@@ -1161,11 +1237,14 @@ mod regularization_tests {
     let targets = Tensor::new(vec![vec![1.0, 0.0]]).unwrap();
 
     let total_loss = reg_loss
-      .forward_with_model(&predictions, &targets, &model)
+      .compute_loss(&predictions, &targets, &model)
       .unwrap();
 
     // Should be base loss + regularization term
-    let base_only_loss = reg_loss.forward(&predictions, &targets).unwrap();
+    let base_only_loss = reg_loss
+      .base_loss()
+      .forward(&predictions, &targets)
+      .unwrap();
     assert!(total_loss.data[[0, 0]] > base_only_loss.data[[0, 0]]);
   }
 
@@ -1179,7 +1258,7 @@ mod regularization_tests {
     let weights = model.weight_tensors();
     let biases = model.bias_tensors();
 
-    let l1_grads = reg_loss.compute_l1_gradient(&weights, &biases);
+    let l1_grads = reg_loss.config().compute_l1_gradient(&weights, &biases);
 
     // First weight matrix: [[2.0, -1.0], [3.0, -2.0]]
     // L1 gradient = 0.1 * sign(w) = [[0.1, -0.1], [0.1, -0.1]]
@@ -1205,7 +1284,7 @@ mod regularization_tests {
     let weights = model.weight_tensors();
     let biases = model.bias_tensors();
 
-    let l2_grads = reg_loss.compute_l2_gradient(&weights, &biases);
+    let l2_grads = reg_loss.config().compute_l2_gradient(&weights, &biases);
 
     // First weight matrix: [[2.0, -1.0], [3.0, -2.0]]
     // L2 gradient = 2 * 0.1 * w = [[0.4, -0.2], [0.6, -0.4]]
@@ -1233,9 +1312,12 @@ mod regularization_tests {
     let targets = Tensor::new(vec![vec![1.0, 0.0]]).unwrap();
 
     let total_loss = reg_loss
-      .forward_with_model(&predictions, &targets, &model)
+      .compute_loss(&predictions, &targets, &model)
       .unwrap();
-    let base_only_loss = reg_loss.forward(&predictions, &targets).unwrap();
+    let base_only_loss = reg_loss
+      .base_loss()
+      .forward(&predictions, &targets)
+      .unwrap();
 
     // Should be identical when no regularization
     assert_abs_diff_eq!(
@@ -1243,5 +1325,33 @@ mod regularization_tests {
       base_only_loss.data[[0, 0]],
       epsilon = 1e-10
     );
+  }
+
+  #[test]
+  #[should_panic(expected = "RegularizedLoss::forward does not include regularization terms")]
+  fn test_regularized_loss_forward_panics() {
+    let base_loss = BinaryCrossEntropy::new();
+    let config = RegularizationConfig::l2_only(0.1);
+    let reg_loss = RegularizedLoss::new(base_loss, config);
+
+    let predictions = Tensor::new(vec![vec![0.8, 0.3]]).unwrap();
+    let targets = Tensor::new(vec![vec![1.0, 0.0]]).unwrap();
+
+    // This should panic
+    let _ = reg_loss.forward(&predictions, &targets);
+  }
+
+  #[test]
+  #[should_panic(expected = "RegularizedLoss::backward does not include regularization gradients")]
+  fn test_regularized_loss_backward_panics() {
+    let base_loss = BinaryCrossEntropy::new();
+    let config = RegularizationConfig::l2_only(0.1);
+    let reg_loss = RegularizedLoss::new(base_loss, config);
+
+    let predictions = Tensor::new(vec![vec![0.8, 0.3]]).unwrap();
+    let targets = Tensor::new(vec![vec![1.0, 0.0]]).unwrap();
+
+    // This should panic
+    let _ = reg_loss.backward(&predictions, &targets);
   }
 }
