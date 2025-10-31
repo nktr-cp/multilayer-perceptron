@@ -99,7 +99,6 @@ fn train_without_regularization(
     early_stopping_min_delta: 0.05,
     enable_early_stopping: true,
     learning_rate: 0.0005,
-    show_gui_plots: false,
     regularization: None,
     #[cfg(not(target_arch = "wasm32"))]
     show_gui_plots: false,
@@ -162,7 +161,7 @@ fn train_with_regularization(
     .linear_layer(16, 1)
     .with_graph(graph);
 
-  let mut config = TrainingConfig {
+  let config = TrainingConfig {
     epochs: 400,
     batch_size: 32,
     shuffle: true,

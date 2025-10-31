@@ -1,90 +1,139 @@
-# Multilayer Perceptron WebAssembly Build Configuration
+# Neural Network Playground - Rust + WebAssembly + Next.js Build System
 
-.PHONY: all build build-wasm build-demo clean test install dev serve help
+.PHONY: all install check-deps build build-wasm build-frontend dev clean test help deploy
 
 # Default target
 all: build
 
-# Install dependencies
+# Install all dependencies
 install:
-	@echo "Installing Node.js dependencies..."
-	npm install
-	@echo "Installing Rust dependencies..."
+	@echo "🔧 Installing dependencies..."
+	@echo "📦 Installing frontend dependencies..."
+	cd frontend && npm install
+	@echo "🦀 Checking Rust toolchain..."
 	cargo check
+	@echo "✅ Installation complete!"
 
-# Build WebAssembly module for web target
-build-wasm:
-	@echo "Building WebAssembly module..."
-	RUSTFLAGS="--cfg=web_sys_unstable_apis" wasm-pack build --no-opt --target web --out-dir pkg --release
+# Check required dependencies
+check-deps:
+	@echo "🔍 Checking dependencies..."
+	@command -v cargo >/dev/null 2>&1 || (echo "❌ Rust/Cargo not found. Install from https://rustup.rs/" && exit 1)
+	@command -v wasm-bindgen >/dev/null 2>&1 || (echo "❌ wasm-bindgen not found. Install with: cargo install wasm-bindgen-cli" && exit 1)
+	@command -v node >/dev/null 2>&1 || (echo "❌ Node.js not found. Install from https://nodejs.org/" && exit 1)
+	@echo "✅ All dependencies found!"
 
-# Build WebAssembly module for Node.js target  
-build-node:
-	@echo "Building WebAssembly module for Node.js..."
-	RUSTFLAGS="--cfg=web_sys_unstable_apis" wasm-pack build --no-opt --target nodejs --out-dir pkg-node --release
+# Build WebAssembly module
+build-wasm: check-deps
+	@echo "🚀 Building WebAssembly module..."
+	cargo build --target wasm32-unknown-unknown --release
+	wasm-bindgen --out-dir pkg --web --typescript target/wasm32-unknown-unknown/release/multilayer_perceptron.wasm
+	@echo "✅ WASM build complete!"
 
-# Build WebAssembly module for bundlers
-build-bundler:
-	@echo "Building WebAssembly module for bundlers..."
-	RUSTFLAGS="--cfg=web_sys_unstable_apis" wasm-pack build --no-opt --target bundler --out-dir pkg-bundler --release
+# Build Next.js frontend 
+build-frontend: build-wasm
+	@echo "⚛️  Building Next.js frontend..."
+	cd frontend && npm run build
+	@echo "✅ Frontend build complete!"
 
-# Build all targets
-build: build-wasm build-node build-bundler
-
-# Build demo website
-build-demo: build-wasm
-	@echo "Building demo website..."
-	npm run build:demo
+# Build everything for production
+build: build-frontend
+	@echo "🎉 Production build complete!"
 
 # Development server with hot reload
 dev: build-wasm
-	@echo "Starting development server..."
-	npm run dev
+	@echo "🔥 Starting development server..."
+	cd frontend && npm run dev
 
-# Simple HTTP server
-serve:
-	@echo "Starting HTTP server on port 8000..."
-	@echo "Open http://localhost:8000/dist in your browser"
-	npm run serve
-
-# Run WebAssembly tests
-test:
-	@echo "Running WebAssembly tests..."
-	wasm-pack test --headless --firefox
-
-# Test with Chrome
-test-chrome:
-	@echo "Running WebAssembly tests in Chrome..."
-	wasm-pack test --headless --chrome
-
-# Run Rust tests
-test-rust:
-	@echo "Running Rust tests..."
-	cargo test
-
-# Run all tests
-test-all: test-rust test
+# Production deployment build
+deploy: build-frontend
+	@echo "🚀 Building for deployment..."
+	cd frontend && npm run export
+	@echo "✅ Deployment build ready in frontend/out/"
 
 # Clean build artifacts
 clean:
-	@echo "Cleaning build artifacts..."
-	rm -rf pkg pkg-node pkg-bundler dist node_modules
+	@echo "🧹 Cleaning build artifacts..."
 	cargo clean
+	rm -rf pkg/
+	rm -rf target/
+	cd frontend && rm -rf .next/ out/ node_modules/.cache/
+	@echo "✅ Clean complete!"
 
-# Lint Rust code
+# Run Rust tests
+test:
+	@echo "🧪 Running Rust tests..."
+	cargo test
+	@echo "✅ Rust tests complete!"
+
+# Run WebAssembly tests  
+test-wasm:
+	@echo "🌐 Running WebAssembly tests..."
+	wasm-pack test --headless --firefox
+	@echo "✅ WASM tests complete!"
+
+# Run frontend tests
+test-frontend:
+	@echo "⚛️  Running frontend tests..."
+	cd frontend && npm run test
+	@echo "✅ Frontend tests complete!"
+
+# Run all tests
+test-all: test test-wasm test-frontend
+	@echo "🎉 All tests complete!"
+
+# Lint and format code
 lint:
-	@echo "Linting Rust code..."
+	@echo "🔍 Linting code..."
 	cargo clippy -- -D warnings
-	cargo fmt --check
+	cd frontend && npm run lint
+	@echo "✅ Linting complete!"
 
-# Format Rust code
+# Format code
 format:
-	@echo "Formatting Rust code..."
+	@echo "🎨 Formatting code..."
 	cargo fmt
+	cd frontend && npm run format
+	@echo "✅ Formatting complete!"
 
 # Check for security vulnerabilities
 audit:
-	@echo "Auditing dependencies..."
+	@echo "🔒 Auditing dependencies..."
 	cargo audit
+	cd frontend && npm audit
+	@echo "✅ Audit complete!"
+
+# Development utilities
+watch:
+	@echo "👀 Starting file watcher for Rust code..."
+	cargo watch -x check -x test
+
+serve-prod:
+	@echo "🌐 Serving production build locally..."
+	cd frontend/out && python3 -m http.server 3000
+
+# Help target
+help:
+	@echo "Neural Network Playground - Build System"
+	@echo ""
+	@echo "Available targets:"
+	@echo "  install       - Install all dependencies"
+	@echo "  check-deps    - Check required tools are installed"
+	@echo "  build-wasm    - Build WebAssembly module only"
+	@echo "  build-frontend- Build Next.js frontend only"  
+	@echo "  build         - Build everything for production"
+	@echo "  dev           - Start development server"
+	@echo "  deploy        - Build for deployment"
+	@echo "  clean         - Clean all build artifacts"
+	@echo "  test          - Run Rust tests"
+	@echo "  test-wasm     - Run WebAssembly tests"
+	@echo "  test-frontend - Run frontend tests"
+	@echo "  test-all      - Run all tests"
+	@echo "  lint          - Lint all code"
+	@echo "  format        - Format all code"
+	@echo "  audit         - Check for security vulnerabilities"
+	@echo "  watch         - Watch Rust files for changes"
+	@echo "  serve-prod    - Serve production build locally"
+	@echo "  help          - Show this help message"
 	npm audit
 
 # Build optimized release
