@@ -67,7 +67,7 @@ jobs:
       - name: Install Node dependencies (Frontend)
         run: |
           cd frontend
-          npm install
+          npm install --legacy-peer-deps
 
       - name: Build Next.js for production
         run: |
