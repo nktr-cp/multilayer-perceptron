@@ -30,8 +30,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
           cache: 'npm'
+          cache-dependency-path: 'frontend/package-lock.json'
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -54,17 +55,31 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Install Node dependencies
-        run: npm install
+      - name: Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli
 
       - name: Build WASM package
         run: |
-          RUSTFLAGS="--cfg=web_sys_unstable_apis" wasm-pack build --no-opt --target web --out-dir pkg --release
-          # Optimize WASM file size with bulk memory and reference types support
-          wasm-opt -Os --enable-bulk-memory --enable-reference-types pkg/multilayer_perceptron_bg.wasm -o pkg/multilayer_perceptron_bg.wasm || echo "wasm-opt not available, skipping optimization"
+          # Build WASM using the specified commands
+          cargo build --target wasm32-unknown-unknown --lib --release
+          wasm-bindgen --target web --out-dir pkg --typescript target/wasm32-unknown-unknown/release/multilayer_perceptron.wasm
 
-      - name: Build for production
-        run: npm run build:pages
+      - name: Copy WASM files to frontend
+        run: |
+          # Create wasm directory in frontend/public
+          mkdir -p frontend/public/wasm
+          # Copy WASM files to frontend public directory
+          cp pkg/multilayer_perceptron.js pkg/multilayer_perceptron_bg.wasm pkg/multilayer_perceptron.d.ts frontend/public/wasm/
+
+      - name: Install Node dependencies (Frontend)
+        run: |
+          cd frontend
+          npm install --legacy-peer-deps
+
+      - name: Build Next.js for production
+        run: |
+          cd frontend
+          npm run build
         env:
           NODE_ENV: production
 
@@ -74,7 +89,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: './dist'
+          path: './frontend/out'
 
   # Deployment job
   deploy:

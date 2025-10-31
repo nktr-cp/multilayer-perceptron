@@ -235,6 +235,46 @@ impl Sequential {
     }
   }
 
+  /// Snapshot dense layer weight matrices for visualization/debugging
+  pub fn weight_matrices(&self) -> Vec<Vec<Vec<f64>>> {
+    let mut matrices = Vec::new();
+
+    for layer in &self.layers {
+      if let Some(dense) = layer.as_any().downcast_ref::<DenseLayer>() {
+        let (rows, cols) = dense.weights().shape();
+        let mut matrix = Vec::with_capacity(rows);
+        for r in 0..rows {
+          let mut row = Vec::with_capacity(cols);
+          for c in 0..cols {
+            row.push(dense.weights().data[[r, c]]);
+          }
+          matrix.push(row);
+        }
+        matrices.push(matrix);
+      }
+    }
+
+    matrices
+  }
+
+  /// Snapshot dense layer bias vectors for visualization/debugging
+  pub fn bias_vectors(&self) -> Vec<Vec<f64>> {
+    let mut vectors = Vec::new();
+
+    for layer in &self.layers {
+      if let Some(dense) = layer.as_any().downcast_ref::<DenseLayer>() {
+        let (_, cols) = dense.bias().shape();
+        let mut bias = Vec::with_capacity(cols);
+        for c in 0..cols {
+          bias.push(dense.bias().data[[0, c]]);
+        }
+        vectors.push(bias);
+      }
+    }
+
+    vectors
+  }
+
   /// Sync gradients from computation graph
   pub fn sync_gradients(&mut self) -> Result<()> {
     for layer in &mut self.layers {

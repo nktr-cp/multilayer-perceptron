@@ -161,7 +161,7 @@ fn train_with_regularization(
     .linear_layer(16, 1)
     .with_graph(graph);
 
-  let mut config = TrainingConfig {
+  let config = TrainingConfig {
     epochs: 400,
     batch_size: 32,
     shuffle: true,
@@ -173,12 +173,8 @@ fn train_with_regularization(
     learning_rate: 0.0005,
     regularization: Some(reg_config),
     #[cfg(not(target_arch = "wasm32"))]
-    show_gui_plots: false,
+    show_gui_plots: gui_plots_enabled(),
   };
-  #[cfg(not(target_arch = "wasm32"))]
-  {
-    config.show_gui_plots = gui_plots_enabled();
-  }
 
   let loss_fn = MeanSquaredError::new();
   let optimizer = SGD::new(config.learning_rate);
